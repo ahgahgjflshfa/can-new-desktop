@@ -11,4 +11,10 @@ const app = createApp(App)
 const pinia = createPinia()
 
 app.use(pinia)
+
+const store = useStore(pinia)
+
+store.loadSettingsFromStorage()
+store.applyThemePreference()
+
 app.mount('#app')

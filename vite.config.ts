@@ -1,6 +1,7 @@
 import tailwind from '@tailwindcss/vite'
 import vue from '@vitejs/plugin-vue'
 import { fileURLToPath, URL } from 'node:url'
+import { resolve } from 'node:path'
 import AutoImport from 'unplugin-auto-import/vite'
 import Components from 'unplugin-vue-components/vite'
 import { defineConfig } from 'vite'
@@ -75,5 +76,11 @@ export default defineConfig({
     emptyOutDir: true,
     chunkSizeWarningLimit: 1024,
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
+    rollupOptions: {
+      input: {
+        main: resolve(__dirname, 'index.html'),
+        popup: resolve(__dirname, 'popup.html'),
+      },
+    },
   },
 })

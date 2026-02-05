@@ -4,6 +4,26 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      ;(() => {
+        try {
+          const raw = localStorage.getItem('tauri-app:settings')
+          const parsed = raw ? JSON.parse(raw) : null
+          const preference =
+            parsed && typeof parsed === 'object' && parsed !== null && 'themePreference' in parsed
+              ? parsed.themePreference
+              : 'system'
+
+          const systemDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+          const theme =
+            preference === 'light' ? 'light' : preference === 'dark' ? 'dark' : systemDark ? 'dark' : 'light'
+
+          document.documentElement.dataset.theme = theme
+        } catch {
+          // Ignore storage access/parse issues.
+        }
+      })()
+    </script>
     <title>Tauri + Vue + Typescript App</title>
   </head>
 

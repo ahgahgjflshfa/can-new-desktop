@@ -5,17 +5,66 @@
 }
 
 @theme {
-  --font-sans: -apple-system, BlinkMacSystemFont, Segoe UI, system-ui, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial, sans-serif, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol, Noto Color Emoji;
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, Segoe UI, system-ui, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial,
+    sans-serif, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol, Noto Color Emoji;
   --font-mono: Cascadia Code, Consolas, Menlo, Ubuntu Mono, DejaVu Sans Mono, Courier New, monospace;
 }
 
+:root {
+  --app-bg: #111827;
+  --app-surface: #030712;
+  --app-surface-2: #1f2937;
+  --app-hover: #111827;
+  --app-border: #1f2937;
+
+  --app-fg: #e5e7eb;
+  --app-fg-strong: #ffffff;
+  --app-muted: #9ca3af;
+  --app-muted-2: #4b5563;
+
+  --app-scrollbar-thumb: #374151;
+  --app-control-bg: #374151;
+  --app-control-knob: #ffffff;
+  --app-nav-active-bg: #1f2937;
+}
+
+html[data-theme='light'] {
+  --app-bg: #f8fafc;
+  --app-surface: #ffffff;
+  --app-surface-2: #f1f5f9;
+  --app-hover: #e2e8f0;
+  --app-border: #e2e8f0;
+
+  --app-fg: #0f172a;
+  --app-fg-strong: #0f172a;
+  --app-muted: #475569;
+  --app-muted-2: #64748b;
+
+  --app-scrollbar-thumb: #cbd5e1;
+  --app-control-bg: #cbd5e1;
+  --app-control-knob: #ffffff;
+  --app-nav-active-bg: #e2e8f0;
+}
+
 html {
-  @apply text-[14px] text-gray-200 bg-gray-800;
+  @apply text-[14px];
+  color: var(--app-fg);
+  background-color: var(--app-bg);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   -webkit-text-size-adjust: 100%;
+  color-scheme: light dark;
+}
+
+html[data-theme='dark'] {
+  color-scheme: dark;
+}
+
+html[data-theme='light'] {
+  color-scheme: light;
 }
 
 a,
@@ -36,7 +85,14 @@ p {
 }
 
 .btn {
-  @apply bg-gray-800 text-gray-200 px-3 py-2 rounded-md my-4 border border-gray-700 hover:bg-gray-700 inline-block;
+  @apply px-3 py-2 rounded-md my-4 border inline-block;
+  background-color: var(--app-surface-2);
+  color: var(--app-fg);
+  border-color: var(--app-border);
+}
+
+.btn:hover {
+  background-color: var(--app-hover);
 }
 
 /* Borrowed from tauri-create-app styles */
@@ -53,9 +109,13 @@ p {
 }
 
 input {
-  @apply bg-gray-700 text-gray-200 px-3 py-2 rounded-md my-4 border border-gray-700 mx-2;
+  @apply px-3 py-2 rounded-md my-4 border mx-2;
+  background-color: var(--app-surface-2);
+  color: var(--app-fg);
+  border-color: var(--app-border);
 }
 
-input, textarea {
+input,
+textarea {
   @apply select-auto;
 }
