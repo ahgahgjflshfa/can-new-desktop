@@ -1,3 +1,5 @@
+use std::fs;
+use std::io::ErrorKind;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Mutex,
@@ -13,6 +15,7 @@ const POPUP_LABEL: &str = "alert-popup";
 const POPUP_WIDTH: f64 = 420.0;
 const POPUP_HEIGHT: f64 = 280.0;
 const API_BASE_URL: &str = "https://www-u.tymetro.com.tw/station_services/api";
+const DEVICE_ID_FILENAME: &str = "device-id";
 
 #[derive(Default)]
 struct MinimizeToTrayState {
@@ -136,6 +139,34 @@ fn build_api_client() -> Result<reqwest::Client, String> {
         .timeout(Duration::from_secs(15))
         .build()
         .map_err(|e| e.to_string())
+}
+
+fn device_id_file_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let mut app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    fs::create_dir_all(&app_data_dir).map_err(|e| e.to_string())?;
+    app_data_dir.push(DEVICE_ID_FILENAME);
+    Ok(app_data_dir)
+}
+
+#[tauri::command]
+fn get_or_create_device_id(app: tauri::AppHandle) -> Result<String, String> {
+    let file_path = device_id_file_path(&app)?;
+
+    match fs::read_to_string(&file_path) {
+        Ok(existing) => {
+            let existing = existing.trim();
+            if !existing.is_empty() {
+                return Ok(existing.to_string());
+            }
+        }
+        Err(err) if err.kind() == ErrorKind::NotFound => {}
+        Err(err) => return Err(err.to_string()),
+    }
+
+    let generated = uuid::Uuid::new_v4().to_string();
+    fs::write(file_path, generated.as_bytes()).map_err(|e| e.to_string())?;
+
+    Ok(generated)
 }
 
 #[tauri::command]
@@ -519,6 +550,7 @@ pub fn run() {
         .plugin(tauri_plugin_prevent_default::init())
         .invoke_handler(tauri::generate_handler![
             greet,
+            get_or_create_device_id,
             auth_login,
             auth_logout,
             fetch_tasks,

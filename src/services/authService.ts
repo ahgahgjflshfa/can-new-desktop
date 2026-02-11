@@ -1,36 +1,18 @@
 import { invoke } from '@tauri-apps/api/core'
 import type { AuthUser, LoginRequest, LoginResponse } from '@/types/auth'
 
-const DEVICE_ID_STORAGE_KEY = 'tauri-app:device-id'
-
-function getOrCreateDeviceId(): string {
-  if (typeof localStorage === 'undefined') {
-    return `web-${Date.now()}`
-  }
-
-  const existing = localStorage.getItem(DEVICE_ID_STORAGE_KEY)
-  if (existing) return existing
-
-  const generated =
-    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID()
-      : `dev-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
-
-  try {
-    localStorage.setItem(DEVICE_ID_STORAGE_KEY, generated)
-  } catch (err) {
-    console.warn('failed to persist device id', err)
-  }
-
-  return generated
+async function getOrCreateDeviceId(): Promise<string> {
+  return invoke<string>('get_or_create_device_id')
 }
 
 export async function loginWithPassword(account: string, password: string): Promise<LoginResponse> {
+  const deviceId = await getOrCreateDeviceId()
+
   const payload: LoginRequest = {
     account,
     password,
     deviceType: 'windows',
-    deviceId: getOrCreateDeviceId(),
+    deviceId,
   }
 
   const data = await invoke<LoginResponse>('auth_login', {
