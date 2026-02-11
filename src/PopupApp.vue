@@ -19,31 +19,34 @@ let unlistenShow: UnlistenFn | null = null
 let unlistenHide: UnlistenFn | null = null
 
 const priorityConfig: Record<NotificationPriority, { bgClass: string; iconClass: string; label: string }> = {
-  critical: {
+  pending: {
     bgClass: 'bg-red-500/80 border-red-600',
     iconClass: 'i-mdi-alert-circle text-red-100',
-    label: 'CRITICAL',
+    label: 'PENDING',
   },
-  high: {
+  replied: {
     bgClass: 'bg-orange-500/80 border-orange-600',
-    iconClass: 'i-mdi-alert text-orange-100',
-    label: 'HIGH',
+    iconClass: 'i-mdi-progress-clock text-orange-100',
+    label: 'REPLIED',
   },
-  medium: {
-    bgClass: 'bg-yellow-500/80 border-yellow-600',
-    iconClass: 'i-mdi-alert-outline text-yellow-100',
-    label: 'MEDIUM',
+  completed: {
+    bgClass: 'bg-green-500/80 border-green-600',
+    iconClass: 'i-mdi-check-circle text-green-100',
+    label: 'COMPLETED',
   },
-  low: {
-    bgClass: 'bg-blue-500/80 border-blue-600',
-    iconClass: 'i-mdi-information text-blue-100',
-    label: 'LOW',
+  ignored: {
+    bgClass: 'bg-slate-500/80 border-slate-600',
+    iconClass: 'i-mdi-eye-off text-slate-100',
+    label: 'IGNORED',
   },
 }
 
 const currentPriorityConfig = computed(() => {
-  if (!currentNotification.value) return priorityConfig.high
-  return priorityConfig[currentNotification.value.priority]
+  if (!currentNotification.value) return priorityConfig.pending
+  if (currentNotification.value.priority in priorityConfig) {
+    return priorityConfig[currentNotification.value.priority]
+  }
+  return priorityConfig.pending
 })
 
 const formattedTime = computed(() => {
@@ -52,13 +55,8 @@ const formattedTime = computed(() => {
   return date.toLocaleString()
 })
 
-async function handleAcknowledge() {
-  if (!currentNotification.value) return
-  await invoke('emit_dismiss_notification', { notificationId: currentNotification.value.id, dismissAll: false })
-}
-
-async function handleDismissAll() {
-  await invoke('emit_dismiss_notification', { notificationId: null, dismissAll: true })
+async function openMainWindow() {
+  await invoke('show_emergency_window')
 }
 
 onMounted(async () => {
@@ -138,23 +136,14 @@ onUnmounted(() => {
     </div>
 
     <!-- Action buttons -->
-    <div class="shrink-0 flex border-t border-black/20">
+    <div class="shrink-0 border-t border-black/20 p-2">
       <button
         type="button"
-        class="flex-1 px-4 py-3 text-sm font-medium text-white/80 hover:bg-black/20 transition-colors border-r border-black/20"
-        @click="handleDismissAll"
+        class="w-full px-4 py-3 text-sm font-semibold text-white hover:bg-black/20 transition-colors"
+        @click="openMainWindow"
       >
-        <span class="i-mdi-notification-clear-all mr-1.5" />
-        Dismiss All ({{ currentNotification.unreadCount }})
-      </button>
-
-      <button
-        type="button"
-        class="flex-1 px-4 py-3 text-sm font-semibold text-white hover:bg-black/20 transition-colors"
-        @click="handleAcknowledge"
-      >
-        <span class="i-mdi-check mr-1.5" />
-        Acknowledge
+        <span class="i-mdi-open-in-new mr-1.5" />
+        Open main app to reply / complete
       </button>
     </div>
   </div>

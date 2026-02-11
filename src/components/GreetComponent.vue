@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { invoke } from '@tauri-apps/api/core'
+import { useStore } from '@/store'
 const store = useStore()
 
 const greetMsg = ref('')

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { useStore } from '@/store'
 import { useNotificationStore } from '@/stores/notificationStore'
-import type { NotificationPriority } from '@/types/notification'
 
 const notificationStore = useNotificationStore()
 
@@ -50,13 +50,6 @@ function formatTime(isoString: string): string {
 function goToAlerts() {
   useStore().currentView = 'notifications'
 }
-
-const priorityConfig: Record<NotificationPriority, { text: string }> = {
-  critical: { text: 'text-red-400' },
-  high: { text: 'text-orange-400' },
-  medium: { text: 'text-yellow-400' },
-  low: { text: 'text-blue-400' },
-}
 </script>
 
 <template>
@@ -75,7 +68,7 @@ const priorityConfig: Record<NotificationPriority, { text: string }> = {
     <div
       class="rounded-xl p-6 border-2 cursor-pointer transition-all hover:scale-[1.01]"
       :class="
-        notificationStore.criticalCount > 0
+        notificationStore.pendingAlertCount > 0
           ? 'bg-red-500/20 border-red-500'
           : notificationStore.unreadCount > 0
             ? 'bg-orange-500/10 border-orange-500/50'
@@ -93,8 +86,8 @@ const priorityConfig: Record<NotificationPriority, { text: string }> = {
             >
               {{ notificationStore.unreadCount }}
             </span>
-            <span v-if="notificationStore.criticalCount > 0" class="text-red-400 font-medium">
-              ({{ notificationStore.criticalCount }} critical)
+            <span v-if="notificationStore.pendingAlertCount > 0" class="text-red-400 font-medium">
+              ({{ notificationStore.pendingAlertCount }} pending)
             </span>
           </div>
         </div>
@@ -134,10 +127,10 @@ const priorityConfig: Record<NotificationPriority, { text: string }> = {
           <span
             class="w-2 h-2 rounded-full shrink-0"
             :class="{
-              'bg-red-500': notification.priority === 'critical',
-              'bg-orange-500': notification.priority === 'high',
-              'bg-yellow-500': notification.priority === 'medium',
-              'bg-blue-500': notification.priority === 'low',
+              'bg-red-500': notification.priority === 'pending',
+              'bg-orange-500': notification.priority === 'replied',
+              'bg-green-500': notification.priority === 'completed',
+              'bg-slate-500': notification.priority === 'ignored',
             }"
           />
           <div class="flex-1 min-w-0">

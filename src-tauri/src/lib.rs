@@ -2,6 +2,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Mutex,
 };
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use tauri::menu::{Menu, MenuItem};
@@ -11,6 +12,7 @@ use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 const POPUP_LABEL: &str = "alert-popup";
 const POPUP_WIDTH: f64 = 420.0;
 const POPUP_HEIGHT: f64 = 280.0;
+const API_BASE_URL: &str = "https://www-u.tymetro.com.tw/station_services/api";
 
 #[derive(Default)]
 struct MinimizeToTrayState {
@@ -42,6 +44,266 @@ struct DismissPayload {
     notification_id: Option<String>,
     #[serde(rename = "dismissAll")]
     dismiss_all: bool,
+}
+
+#[derive(Deserialize)]
+struct ApiEnvelope<T> {
+    status: String,
+    message: Option<String>,
+    data: Option<T>,
+}
+
+#[derive(Deserialize)]
+struct LoginApiData {
+    token: String,
+    user: LoginApiUser,
+}
+
+#[derive(Deserialize)]
+struct LoginApiUser {
+    name: String,
+    station_id: String,
+    section_id: Option<String>,
+    role: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AuthLoginRequest {
+    account: String,
+    password: String,
+    device_type: String,
+    device_id: String,
+    fcm_token: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AuthUser {
+    name: String,
+    station_id: String,
+    section_id: Option<String>,
+    role: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AuthLoginResponse {
+    token: String,
+    user: AuthUser,
+}
+
+#[derive(Serialize)]
+struct AuthLoginRequestBody<'a> {
+    account: &'a str,
+    password: &'a str,
+    device_type: &'a str,
+    device_id: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fcm_token: Option<&'a str>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct TaskApiItem {
+    id: i64,
+    station_id: String,
+    station_name: String,
+    location_name: String,
+    location_code: String,
+    status: String,
+    created_at: Option<i64>,
+    replied_at: Option<i64>,
+    done_at: Option<i64>,
+}
+
+#[derive(Deserialize)]
+struct TaskStatusItem {
+    id: i64,
+    status: String,
+}
+
+#[derive(Serialize)]
+struct CompleteTaskRequestBody<'a> {
+    result: &'a str,
+}
+
+fn build_api_url(path: &str) -> String {
+    format!("{}{}", API_BASE_URL.trim_end_matches('/'), path)
+}
+
+fn build_api_client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn auth_login(payload: AuthLoginRequest) -> Result<AuthLoginResponse, String> {
+    let client = build_api_client()?;
+    let body = AuthLoginRequestBody {
+        account: payload.account.as_str(),
+        password: payload.password.as_str(),
+        device_type: payload.device_type.as_str(),
+        device_id: payload.device_id.as_str(),
+        fcm_token: payload.fcm_token.as_deref(),
+    };
+
+    let response = client
+        .post(build_api_url("/auth/login"))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let status_code = response.status();
+    let envelope = response
+        .json::<ApiEnvelope<LoginApiData>>()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !status_code.is_success() || envelope.status != "success" {
+        return Err(envelope
+            .message
+            .unwrap_or_else(|| format!("Login failed with status {}", status_code)));
+    }
+
+    let data = envelope
+        .data
+        .ok_or_else(|| "Login response missing data".to_string())?;
+
+    Ok(AuthLoginResponse {
+        token: data.token,
+        user: AuthUser {
+            name: data.user.name,
+            station_id: data.user.station_id,
+            section_id: data.user.section_id,
+            role: data.user.role,
+        },
+    })
+}
+
+#[tauri::command]
+async fn auth_logout(token: String) -> Result<(), String> {
+    let client = build_api_client()?;
+    let response = client
+        .post(build_api_url("/auth/logout"))
+        .bearer_auth(token)
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let status_code = response.status();
+    let envelope = response
+        .json::<ApiEnvelope<serde_json::Value>>()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !status_code.is_success() || envelope.status != "success" {
+        return Err(envelope
+            .message
+            .unwrap_or_else(|| format!("Logout failed with status {}", status_code)));
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn fetch_tasks(token: String) -> Result<Vec<TaskApiItem>, String> {
+    let client = build_api_client()?;
+    let response = client
+        .get(build_api_url("/tasks"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let status_code = response.status();
+    let envelope = response
+        .json::<ApiEnvelope<Vec<TaskApiItem>>>()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !status_code.is_success() || envelope.status != "success" {
+        return Err(envelope
+            .message
+            .unwrap_or_else(|| format!("Fetch tasks failed with status {}", status_code)));
+    }
+
+    Ok(envelope.data.unwrap_or_default())
+}
+
+#[tauri::command]
+async fn reply_task(token: String, task_id: i64) -> Result<String, String> {
+    let client = build_api_client()?;
+    let response = client
+        .post(build_api_url(format!("/tasks/{}/reply", task_id).as_str()))
+        .bearer_auth(token)
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let status_code = response.status();
+    let envelope = response
+        .json::<ApiEnvelope<Vec<TaskStatusItem>>>()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !status_code.is_success() || envelope.status != "success" {
+        return Err(envelope
+            .message
+            .unwrap_or_else(|| format!("Reply task failed with status {}", status_code)));
+    }
+
+    let status = envelope
+        .data
+        .and_then(|items| items.into_iter().find(|item| item.id == task_id))
+        .map(|item| item.status)
+        .unwrap_or_else(|| "replied".to_string());
+
+    Ok(status)
+}
+
+#[tauri::command]
+async fn complete_task(token: String, task_id: i64, result: String) -> Result<String, String> {
+    if result != "normal" && result != "no_passenger" {
+        return Err("Invalid completion result".to_string());
+    }
+
+    let client = build_api_client()?;
+    let response = client
+        .post(build_api_url(
+            format!("/tasks/{}/complete", task_id).as_str(),
+        ))
+        .bearer_auth(token)
+        .json(&CompleteTaskRequestBody {
+            result: result.as_str(),
+        })
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let status_code = response.status();
+    let envelope = response
+        .json::<ApiEnvelope<Vec<TaskStatusItem>>>()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !status_code.is_success() || envelope.status != "success" {
+        return Err(envelope
+            .message
+            .unwrap_or_else(|| format!("Complete task failed with status {}", status_code)));
+    }
+
+    let status = envelope
+        .data
+        .and_then(|items| items.into_iter().find(|item| item.id == task_id))
+        .map(|item| item.status)
+        .unwrap_or_else(|| "completed".to_string());
+
+    Ok(status)
 }
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
@@ -257,6 +519,11 @@ pub fn run() {
         .plugin(tauri_plugin_prevent_default::init())
         .invoke_handler(tauri::generate_handler![
             greet,
+            auth_login,
+            auth_logout,
+            fetch_tasks,
+            reply_task,
+            complete_task,
             set_minimize_to_tray_on_close,
             show_emergency_window,
             hide_emergency_window,

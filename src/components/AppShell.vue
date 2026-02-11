@@ -1,5 +1,9 @@
 <script setup lang="ts">
+import { useStore } from '@/store'
+import { useAuthStore } from '@/stores/authStore'
+
 const store = useStore()
+const authStore = useAuthStore()
 
 const SIDEBAR_COLLAPSED_STORAGE_KEY = 'tauri-app:sidebarCollapsed'
 const isSidebarCollapsed = ref(false)
@@ -23,6 +27,10 @@ function toggleSidebar() {
 
 function setView(view: typeof store.currentView) {
   store.currentView = view
+}
+
+async function handleLogout() {
+  void authStore.logout()
 }
 </script>
 
@@ -101,6 +109,23 @@ function setView(view: typeof store.currentView) {
       </nav>
 
       <div class="p-3 border-t border-[var(--app-border)] flex flex-col gap-2">
+        <div
+          v-if="!isSidebarCollapsed"
+          class="rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-2)] px-3 py-2 text-xs"
+        >
+          <div class="font-medium text-[var(--app-fg)]">{{ authStore.user?.name }}</div>
+          <div class="text-[var(--app-muted)]">{{ authStore.user?.stationId }} · {{ authStore.user?.role }}</div>
+        </div>
+
+        <button
+          type="button"
+          class="w-full rounded-lg border border-[var(--app-border)] px-3 py-2 text-sm text-[var(--app-muted)] transition-colors hover:bg-[var(--app-hover)] hover:text-[var(--app-fg)]"
+          @click="handleLogout"
+        >
+          <span class="i-mdi-logout mr-1" />
+          Sign out
+        </button>
+
         <div
           class="text-xs text-[var(--app-muted-2)] text-center overflow-hidden whitespace-nowrap transition-opacity duration-300"
           :class="[isSidebarCollapsed ? 'opacity-0 h-0' : 'opacity-100']"

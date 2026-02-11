@@ -1,5 +1,5 @@
 import type { EmergencyNotification, NotificationState } from '@/types/notification'
-import { fetchNotifications, MOCK_SERVER_URL } from './mockServer'
+import { fetchNotifications, OFFICIAL_SERVER_URL } from './notificationDataSource'
 
 export interface NotificationPollerCallbacks {
   onNewNotifications: (notifications: EmergencyNotification[]) => void
@@ -23,7 +23,7 @@ export interface PollingStats {
 }
 
 const DEFAULT_CONFIG: NotificationPollerConfig = {
-  serverUrl: MOCK_SERVER_URL,
+  serverUrl: OFFICIAL_SERVER_URL,
   intervalMs: 10000,
 }
 

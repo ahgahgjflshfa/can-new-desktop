@@ -1,15 +1,15 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createNotificationPoller, type NotificationPollerCallbacks } from '@/services/notificationPoller'
-import * as mockServer from '@/services/mockServer'
+import * as notificationDataSource from '@/services/notificationDataSource'
 import type { EmergencyNotification, NotificationApiResponse } from '@/types/notification'
 
-vi.mock('@/services/mockServer', () => ({
-  MOCK_SERVER_URL: 'https://mock-server.example.com/api/notifications',
+vi.mock('@/services/notificationDataSource', () => ({
+  OFFICIAL_SERVER_URL: 'https://www-u.tymetro.com.tw/station_services/api',
   fetchNotifications: vi.fn(),
 }))
 
 describe('notificationPoller', () => {
-  const mockFetchNotifications = vi.mocked(mockServer.fetchNotifications)
+  const mockFetchNotifications = vi.mocked(notificationDataSource.fetchNotifications)
 
   beforeEach(() => {
     vi.useFakeTimers()
@@ -25,7 +25,7 @@ describe('notificationPoller', () => {
       id: `notif_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
       title: 'Test Notification',
       body: 'This is a test notification body',
-      priority: 'high',
+      priority: 'pending',
       createdAt: new Date().toISOString(),
       receivedAt: new Date().toISOString(),
       ...overrides,

@@ -1,19 +1,21 @@
 <script setup lang="ts">
 import { useNotificationStore } from '@/stores/notificationStore'
 import type { NotificationPriority, NotificationState } from '@/types/notification'
-import { generateTestNotification } from '@/services/mockServer'
 
 const notificationStore = useNotificationStore()
 
 const priorityStyles: Record<NotificationPriority, { borderClass: string; iconClass: string }> = {
-  critical: { borderClass: 'border-l-red-500', iconClass: 'i-mdi-alert-circle text-red-500' },
-  high: { borderClass: 'border-l-orange-500', iconClass: 'i-mdi-alert text-orange-500' },
-  medium: { borderClass: 'border-l-yellow-500', iconClass: 'i-mdi-alert-outline text-yellow-500' },
-  low: { borderClass: 'border-l-blue-500', iconClass: 'i-mdi-information text-blue-500' },
+  pending: { borderClass: 'border-l-red-500', iconClass: 'i-mdi-alert-circle text-red-500' },
+  replied: { borderClass: 'border-l-orange-500', iconClass: 'i-mdi-progress-clock text-orange-500' },
+  completed: { borderClass: 'border-l-green-500', iconClass: 'i-mdi-check-circle text-green-500' },
+  ignored: { borderClass: 'border-l-slate-500', iconClass: 'i-mdi-eye-off text-slate-500' },
 }
 
-function getPriorityStyle(priority: NotificationPriority) {
-  return priorityStyles[priority]
+function getPriorityStyle(priority: string) {
+  if (priority in priorityStyles) {
+    return priorityStyles[priority as NotificationPriority]
+  }
+  return priorityStyles.pending
 }
 
 function formatDate(dateString: string): string {
@@ -37,11 +39,6 @@ function handleDelete(notificationId: string) {
 
 function handleClearHistory() {
   notificationStore.clearHistory()
-}
-
-function handleTriggerTest(priority: NotificationPriority = 'high') {
-  const testNotification = generateTestNotification(priority)
-  notificationStore.addTestNotification(testNotification)
 }
 
 function getStatusBadge(notification: NotificationState): { text: string; class: string } {
@@ -68,48 +65,6 @@ function getStatusBadge(notification: NotificationState): { text: string; class:
         >
           {{ notificationStore.unreadCount }} unread
         </span>
-      </div>
-    </div>
-
-    <div class="bg-[var(--app-surface-2)] rounded-xl p-6 border border-[var(--app-border)] mb-6">
-      <h2 class="text-xl font-semibold mb-4 text-[var(--app-fg)] flex items-center gap-2">
-        <div class="i-mdi-test-tube text-sky-500" />
-        Testing
-      </h2>
-
-      <p class="text-sm text-[var(--app-muted)] mb-4">
-        Trigger test notifications to verify the emergency modal works correctly.
-      </p>
-
-      <div class="flex flex-wrap gap-2">
-        <button
-          type="button"
-          class="px-4 py-2 rounded-lg text-sm font-medium bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors"
-          @click="handleTriggerTest('critical')"
-        >
-          Critical Alert
-        </button>
-        <button
-          type="button"
-          class="px-4 py-2 rounded-lg text-sm font-medium bg-orange-500/20 text-orange-400 hover:bg-orange-500/30 transition-colors"
-          @click="handleTriggerTest('high')"
-        >
-          High Priority
-        </button>
-        <button
-          type="button"
-          class="px-4 py-2 rounded-lg text-sm font-medium bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30 transition-colors"
-          @click="handleTriggerTest('medium')"
-        >
-          Medium Priority
-        </button>
-        <button
-          type="button"
-          class="px-4 py-2 rounded-lg text-sm font-medium bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 transition-colors"
-          @click="handleTriggerTest('low')"
-        >
-          Low Priority
-        </button>
       </div>
     </div>
 
@@ -183,6 +138,7 @@ function getStatusBadge(notification: NotificationState): { text: string; class:
             </div>
 
             <button
+              v-if="notification.status === 'dismissed' || notification.priority === 'completed'"
               type="button"
               class="shrink-0 p-2 rounded-lg text-[var(--app-muted)] hover:bg-[var(--app-surface)] hover:text-red-400 transition-colors"
               title="Delete notification"

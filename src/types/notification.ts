@@ -1,4 +1,4 @@
-export type NotificationPriority = 'critical' | 'high' | 'medium' | 'low'
+export type NotificationPriority = 'pending' | 'replied' | 'completed' | 'ignored'
 
 export type NotificationStatus = 'pending' | 'shown' | 'dismissed'
 

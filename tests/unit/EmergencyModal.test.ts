@@ -33,7 +33,7 @@ describe('EmergencyModal', () => {
       id: `notif_${Date.now()}`,
       title: 'Emergency Alert',
       body: 'This is a test emergency notification',
-      priority: 'high',
+      priority: 'pending',
       createdAt: new Date().toISOString(),
       receivedAt: new Date().toISOString(),
       status: 'shown',

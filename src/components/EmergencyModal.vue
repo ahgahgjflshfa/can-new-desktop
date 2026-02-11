@@ -6,31 +6,34 @@ import type { NotificationPriority } from '@/types/notification'
 const notificationStore = useNotificationStore()
 
 const priorityConfig: Record<NotificationPriority, { bgClass: string; iconClass: string; label: string }> = {
-  critical: {
+  pending: {
     bgClass: 'bg-red-500/80 border-red-500',
     iconClass: 'i-mdi-alert-circle text-red-200',
-    label: 'CRITICAL',
+    label: 'PENDING',
   },
-  high: {
+  replied: {
     bgClass: 'bg-orange-500/80 border-orange-500',
-    iconClass: 'i-mdi-alert text-orange-200',
-    label: 'HIGH',
+    iconClass: 'i-mdi-progress-clock text-orange-200',
+    label: 'REPLIED',
   },
-  medium: {
-    bgClass: 'bg-yellow-500/80 border-yellow-500',
-    iconClass: 'i-mdi-alert-outline text-yellow-200',
-    label: 'MEDIUM',
+  completed: {
+    bgClass: 'bg-green-500/80 border-green-500',
+    iconClass: 'i-mdi-check-circle text-green-200',
+    label: 'COMPLETED',
   },
-  low: {
-    bgClass: 'bg-blue-500/80 border-blue-500',
-    iconClass: 'i-mdi-information text-blue-200',
-    label: 'LOW',
+  ignored: {
+    bgClass: 'bg-slate-500/80 border-slate-500',
+    iconClass: 'i-mdi-eye-off text-slate-200',
+    label: 'IGNORED',
   },
 }
 
 const currentPriorityConfig = computed(() => {
-  if (!notificationStore.currentNotification) return priorityConfig.high
-  return priorityConfig[notificationStore.currentNotification.priority]
+  if (!notificationStore.currentNotification) return priorityConfig.pending
+  if (notificationStore.currentNotification.priority in priorityConfig) {
+    return priorityConfig[notificationStore.currentNotification.priority]
+  }
+  return priorityConfig.pending
 })
 
 const formattedTime = computed(() => {
@@ -39,12 +42,15 @@ const formattedTime = computed(() => {
   return date.toLocaleString()
 })
 
-function handleDismiss() {
-  notificationStore.dismissCurrentNotification()
+const canReply = computed(() => notificationStore.currentNotification?.priority === 'pending')
+const canComplete = computed(() => notificationStore.currentNotification?.priority === 'replied')
+
+function handleReply() {
+  void notificationStore.replyCurrentTask()
 }
 
-function handleDismissAll() {
-  notificationStore.dismissAllNotifications()
+function handleComplete(result: 'normal' | 'no_passenger') {
+  void notificationStore.completeCurrentTask(result)
 }
 </script>
 
@@ -54,7 +60,6 @@ function handleDismissAll() {
       <div
         v-if="notificationStore.hasNewNotification"
         class="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm"
-        @click.self="handleDismiss"
       >
         <div
           class="w-full max-w-2xl mx-4 rounded-2xl border-2 bg-[var(--app-surface)] shadow-2xl shadow-black/50 overflow-hidden"
@@ -101,24 +106,44 @@ function handleDismissAll() {
             </div>
           </div>
 
-          <div class="flex border-t border-[var(--app-border)] bg-[var(--app-surface-2)]">
-            <button
-              type="button"
-              class="flex-1 px-6 py-4 text-base font-medium text-[var(--app-muted)] hover:bg-[var(--app-hover)] hover:text-[var(--app-fg)] transition-colors border-r border-[var(--app-border)]"
-              @click="handleDismissAll"
-            >
-              <span class="i-mdi-notification-clear-all mr-2" />
-              Dismiss All ({{ notificationStore.unreadCount }})
-            </button>
+          <div class="border-t border-[var(--app-border)] bg-[var(--app-surface-2)] p-3 space-y-2">
+            <p v-if="notificationStore.taskActionError" class="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-400">
+              {{ notificationStore.taskActionError }}
+            </p>
 
             <button
+              v-if="canReply"
               type="button"
-              class="flex-1 px-6 py-4 text-base font-semibold text-sky-400 hover:bg-sky-500/10 transition-colors"
-              @click="handleDismiss"
+              class="w-full rounded-lg bg-sky-600 px-6 py-3 text-base font-semibold text-white transition-colors hover:bg-sky-500 disabled:opacity-60"
+              :disabled="notificationStore.isTaskActionPending"
+              @click="handleReply"
             >
-              <span class="i-mdi-check mr-2" />
-              Acknowledge
+              {{ notificationStore.isTaskActionPending ? 'Submitting...' : 'Reply (Take Task)' }}
             </button>
+
+            <div v-if="canComplete" class="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                class="rounded-lg bg-green-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-green-500 disabled:opacity-60"
+                :disabled="notificationStore.isTaskActionPending"
+                @click="handleComplete('normal')"
+              >
+                Complete: Normal
+              </button>
+
+              <button
+                type="button"
+                class="rounded-lg bg-orange-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-orange-500 disabled:opacity-60"
+                :disabled="notificationStore.isTaskActionPending"
+                @click="handleComplete('no_passenger')"
+              >
+                Complete: No Passenger
+              </button>
+            </div>
+
+            <p v-if="!canReply && !canComplete" class="px-2 py-1 text-sm text-[var(--app-muted)]">
+              Waiting for updated task status...
+            </p>
           </div>
         </div>
       </div>

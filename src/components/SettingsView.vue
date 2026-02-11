@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useStore } from '@/store'
 import { useNotificationStore } from '@/stores/notificationStore'
 
 const store = useStore()

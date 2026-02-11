@@ -70,7 +70,7 @@ describe('notificationStore', () => {
       id,
       title: 'Test Alert',
       body: 'Test notification body',
-      priority: 'high',
+      priority: 'pending',
       createdAt: new Date().toISOString(),
       receivedAt: new Date().toISOString(),
       ...overrides,

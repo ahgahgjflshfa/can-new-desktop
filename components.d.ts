@@ -15,6 +15,7 @@ declare module 'vue' {
     EmergencyModal: typeof import('./src/components/EmergencyModal.vue')['default']
     GreetComponent: typeof import('./src/components/GreetComponent.vue')['default']
     HomeView: typeof import('./src/components/HomeView.vue')['default']
+    LoginView: typeof import('./src/components/LoginView.vue')['default']
     NotificationsView: typeof import('./src/components/NotificationsView.vue')['default']
     SettingsView: typeof import('./src/components/SettingsView.vue')['default']
   }

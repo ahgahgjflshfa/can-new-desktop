@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import type { EmergencyNotification, NotificationState, NotificationPriority } from '@/types/notification'
 import { getNotificationPoller, convertToNotificationState, type PollingStats } from '@/services/notificationPoller'
+import { completeTask, replyTask, type CompletionResult } from '@/services/taskActionService'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { isTauriRuntime } from '@/tauri/window'
@@ -40,6 +41,52 @@ interface DismissPayload {
   dismissAll: boolean
 }
 
+function normalizePriority(value: unknown): NotificationPriority {
+  if (value === 'pending' || value === 'replied' || value === 'completed' || value === 'ignored') {
+    return value
+  }
+
+  if (value === 'critical') return 'pending'
+  if (value === 'high') return 'replied'
+  if (value === 'medium') return 'completed'
+  if (value === 'low') return 'ignored'
+
+  return 'pending'
+}
+
+function normalizeNotificationStatus(value: unknown): NotificationState['status'] {
+  if (value === 'pending' || value === 'shown' || value === 'dismissed') {
+    return value
+  }
+  return 'pending'
+}
+
+function normalizeStoredNotification(input: unknown): NotificationState | null {
+  if (!input || typeof input !== 'object') return null
+  const record = input as Partial<NotificationState>
+
+  if (typeof record.id !== 'string' || record.id.length === 0) return null
+  if (typeof record.title !== 'string') return null
+  if (typeof record.body !== 'string') return null
+  if (typeof record.createdAt !== 'string') return null
+  if (typeof record.receivedAt !== 'string') return null
+
+  return {
+    id: record.id,
+    title: record.title,
+    body: record.body,
+    priority: normalizePriority(record.priority),
+    createdAt: record.createdAt,
+    receivedAt: record.receivedAt,
+    status: normalizeNotificationStatus(record.status),
+    dismissedAt: typeof record.dismissedAt === 'string' ? record.dismissedAt : undefined,
+    category: typeof record.category === 'string' ? record.category : undefined,
+    actionUrl: typeof record.actionUrl === 'string' ? record.actionUrl : undefined,
+    metadata:
+      record.metadata && typeof record.metadata === 'object' ? (record.metadata as Record<string, unknown>) : undefined,
+  }
+}
+
 export const useNotificationStore = defineStore('notifications', {
   state: () => ({
     notifications: [] as NotificationState[],
@@ -57,6 +104,8 @@ export const useNotificationStore = defineStore('notifications', {
       lastError: null as string | null,
       isConnected: false,
     } as PollingStats,
+    isTaskActionPending: false,
+    taskActionError: null as string | null,
   }),
 
   getters: {
@@ -87,10 +136,10 @@ export const useNotificationStore = defineStore('notifications', {
 
     countByPriority: state => {
       const counts: Record<NotificationPriority, number> = {
-        critical: 0,
-        high: 0,
-        medium: 0,
-        low: 0,
+        pending: 0,
+        replied: 0,
+        completed: 0,
+        ignored: 0,
       }
       for (const n of state.notifications) {
         if (n.status !== 'dismissed') {
@@ -104,8 +153,8 @@ export const useNotificationStore = defineStore('notifications', {
       return state.notifications.slice(0, 10)
     },
 
-    criticalCount: state => {
-      return state.notifications.filter(n => n.priority === 'critical' && n.status !== 'dismissed').length
+    pendingAlertCount: state => {
+      return state.notifications.filter(n => n.priority === 'pending' && n.status !== 'dismissed').length
     },
 
     pollingIntervalSeconds: state => {
@@ -211,6 +260,69 @@ export const useNotificationStore = defineStore('notifications', {
         } catch (err) {
           console.warn('Failed to show alert popup:', err)
         }
+      }
+    },
+
+    setTaskStatus(notificationId: string, priority: NotificationPriority) {
+      const notification = this.notifications.find(n => n.id === notificationId)
+      if (!notification) return
+
+      notification.priority = priority
+      notification.category = priority
+
+      if (this.currentNotification?.id === notificationId) {
+        this.currentNotification.priority = priority
+        this.currentNotification.category = priority
+      }
+    },
+
+    async replyCurrentTask() {
+      if (!this.currentNotification) return
+
+      const taskId = Number(this.currentNotification.id)
+      if (!Number.isFinite(taskId)) {
+        this.taskActionError = 'Invalid task id'
+        return
+      }
+
+      this.isTaskActionPending = true
+      this.taskActionError = null
+
+      try {
+        const status = await replyTask(taskId)
+        if (status === 'replied' || status === 'completed' || status === 'ignored' || status === 'pending') {
+          this.setTaskStatus(this.currentNotification.id, status)
+        } else {
+          this.setTaskStatus(this.currentNotification.id, 'replied')
+        }
+        this.saveToStorage()
+      } catch (err) {
+        this.taskActionError = err instanceof Error ? err.message : String(err)
+      } finally {
+        this.isTaskActionPending = false
+      }
+    },
+
+    async completeCurrentTask(result: CompletionResult) {
+      if (!this.currentNotification) return
+
+      const taskId = Number(this.currentNotification.id)
+      if (!Number.isFinite(taskId)) {
+        this.taskActionError = 'Invalid task id'
+        return
+      }
+
+      this.isTaskActionPending = true
+      this.taskActionError = null
+
+      try {
+        await completeTask(taskId, result)
+        this.setTaskStatus(this.currentNotification.id, 'completed')
+        this.dismissNotificationById(this.currentNotification.id)
+      } catch (err) {
+        this.taskActionError = err instanceof Error ? err.message : String(err)
+      } finally {
+        this.isTaskActionPending = false
       }
     },
 
@@ -328,7 +440,9 @@ export const useNotificationStore = defineStore('notifications', {
         try {
           const parsed = JSON.parse(raw) as unknown
           if (Array.isArray(parsed)) {
-            this.notifications = parsed as NotificationState[]
+            this.notifications = parsed
+              .map(normalizeStoredNotification)
+              .filter((item): item is NotificationState => item !== null)
           }
         } catch (err) {
           console.warn('Failed to parse stored notifications:', err)
@@ -375,10 +489,6 @@ export const useNotificationStore = defineStore('notifications', {
       } catch (err) {
         console.warn('Failed to save settings:', err)
       }
-    },
-
-    addTestNotification(notification: EmergencyNotification) {
-      this.handleNewNotifications([notification])
     },
   },
 })
