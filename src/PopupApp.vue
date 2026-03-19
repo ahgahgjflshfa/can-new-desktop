@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
+import { replyTask } from '@/services/taskActionService'
 import type { NotificationPriority } from '@/types/notification'
 
 interface NotificationPayload {
@@ -15,6 +16,8 @@ interface NotificationPayload {
 }
 
 const currentNotification = ref<NotificationPayload | null>(null)
+const isAcknowledging = ref(false)
+const acknowledgeError = ref<string | null>(null)
 let unlistenShow: UnlistenFn | null = null
 let unlistenHide: UnlistenFn | null = null
 
@@ -59,9 +62,37 @@ async function openMainWindow() {
   await invoke('show_emergency_window')
 }
 
+async function acknowledgeCurrentAlert() {
+  if (!currentNotification.value || isAcknowledging.value) return
+
+  const notificationId = currentNotification.value.id
+  const taskId = Number(notificationId)
+  if (!Number.isFinite(taskId)) {
+    acknowledgeError.value = 'Invalid task id'
+    return
+  }
+
+  isAcknowledging.value = true
+  acknowledgeError.value = null
+
+  try {
+    await replyTask(taskId)
+
+    await invoke('emit_dismiss_notification', {
+      notificationId,
+      dismissAll: false,
+    })
+  } catch (err) {
+    acknowledgeError.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    isAcknowledging.value = false
+  }
+}
+
 onMounted(async () => {
   unlistenShow = await listen<NotificationPayload>('show-notification', event => {
     console.log('[Popup] Received show-notification event:', event.payload)
+    acknowledgeError.value = null
     currentNotification.value = event.payload
   })
 
@@ -136,7 +167,17 @@ onUnmounted(() => {
     </div>
 
     <!-- Action buttons -->
-    <div class="shrink-0 border-t border-black/20 p-2">
+    <div class="shrink-0 border-t border-black/20 p-2 space-y-2">
+      <button
+        type="button"
+        class="w-full px-4 py-3 text-sm font-semibold text-white bg-black/25 hover:bg-black/35 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+        :disabled="isAcknowledging"
+        @click="acknowledgeCurrentAlert"
+      >
+        <span class="i-mdi-check-bold mr-1.5" />
+        {{ isAcknowledging ? 'Acknowledging...' : 'Acknowledge' }}
+      </button>
+
       <button
         type="button"
         class="w-full px-4 py-3 text-sm font-semibold text-white hover:bg-black/20 transition-colors"
@@ -145,6 +186,10 @@ onUnmounted(() => {
         <span class="i-mdi-open-in-new mr-1.5" />
         Open main app to reply / complete
       </button>
+
+      <p v-if="acknowledgeError" class="px-1 text-xs text-white/90">
+        {{ acknowledgeError }}
+      </p>
     </div>
   </div>
 

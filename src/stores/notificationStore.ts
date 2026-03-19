@@ -10,30 +10,25 @@ const NOTIFICATION_STORAGE_KEY = 'tauri-app:notifications'
 const SETTINGS_STORAGE_KEY = 'tauri-app:notification-settings'
 const MAX_STORED_NOTIFICATIONS = 100
 const DEFAULT_POLLING_INTERVAL = 10000
-const REFOCUS_INTERVAL_MS = 5000
+const IN_APP_REMINDER_MS = 4000
+const REPLIED_ESCALATION_MS = 15 * 60 * 1000
 
-let refocusIntervalId: ReturnType<typeof setInterval> | null = null
 let _dismissEventUnlisten: UnlistenFn | null = null
 let _popupClosedUnlisten: UnlistenFn | null = null
+let inAppReminderTimeoutId: ReturnType<typeof setTimeout> | null = null
 
-function startRefocusInterval(): void {
-  stopRefocusInterval()
-  if (!isTauriRuntime()) return
-
-  refocusIntervalId = setInterval(async () => {
-    try {
-      await invoke('focus_alert_popup')
-    } catch (err) {
-      console.warn('Failed to refocus alert popup:', err)
-    }
-  }, REFOCUS_INTERVAL_MS)
+function clearInAppReminderTimeout(): void {
+  if (inAppReminderTimeoutId !== null) {
+    clearTimeout(inAppReminderTimeoutId)
+    inAppReminderTimeoutId = null
+  }
 }
 
-function stopRefocusInterval(): void {
-  if (refocusIntervalId !== null) {
-    clearInterval(refocusIntervalId)
-    refocusIntervalId = null
-  }
+function isMainWindowActive(): boolean {
+  if (typeof document === 'undefined') return false
+
+  const hasFocus = typeof document.hasFocus === 'function' ? document.hasFocus() : true
+  return document.visibilityState === 'visible' && hasFocus
 }
 
 interface DismissPayload {
@@ -80,6 +75,7 @@ function normalizeStoredNotification(input: unknown): NotificationState | null {
     receivedAt: record.receivedAt,
     status: normalizeNotificationStatus(record.status),
     dismissedAt: typeof record.dismissedAt === 'string' ? record.dismissedAt : undefined,
+    repliedAt: typeof record.repliedAt === 'string' ? record.repliedAt : undefined,
     category: typeof record.category === 'string' ? record.category : undefined,
     actionUrl: typeof record.actionUrl === 'string' ? record.actionUrl : undefined,
     metadata:
@@ -106,6 +102,8 @@ export const useNotificationStore = defineStore('notifications', {
     } as PollingStats,
     isTaskActionPending: false,
     taskActionError: null as string | null,
+    inAppReminderVisible: false,
+    inAppReminderCount: 0,
   }),
 
   getters: {
@@ -171,6 +169,117 @@ export const useNotificationStore = defineStore('notifications', {
       }
     },
 
+    isTaskUnresolved(notification: NotificationState) {
+      return notification.priority === 'pending' || notification.priority === 'replied'
+    },
+
+    getUnresolvedNotifications() {
+      return this.notifications.filter(
+        notification => notification.status !== 'dismissed' && this.isTaskUnresolved(notification)
+      )
+    },
+
+    isRepliedEscalated(notification: NotificationState) {
+      if (notification.priority !== 'replied') return false
+
+      const repliedAtMs = notification.repliedAt ? new Date(notification.repliedAt).getTime() : Number.NaN
+      if (!Number.isFinite(repliedAtMs)) return false
+
+      return Date.now() - repliedAtMs >= REPLIED_ESCALATION_MS
+    },
+
+    showInAppReminder(count: number) {
+      this.inAppReminderVisible = true
+      this.inAppReminderCount = count
+
+      clearInAppReminderTimeout()
+      inAppReminderTimeoutId = setTimeout(() => {
+        this.inAppReminderVisible = false
+      }, IN_APP_REMINDER_MS)
+    },
+
+    hideInAppReminder() {
+      this.inAppReminderVisible = false
+      clearInAppReminderTimeout()
+    },
+
+    clearReminderSignals() {
+      this.hideInAppReminder()
+    },
+
+    updateExistingNotification(existing: NotificationState, incoming: EmergencyNotification) {
+      const previousPriority = existing.priority
+
+      existing.title = incoming.title
+      existing.body = incoming.body
+      existing.priority = incoming.priority
+      existing.category = incoming.category
+      existing.createdAt = incoming.createdAt
+      existing.receivedAt = incoming.receivedAt
+      existing.metadata = incoming.metadata
+
+      if (incoming.priority === 'replied') {
+        if (previousPriority !== 'replied' || !existing.repliedAt) {
+          existing.repliedAt = new Date().toISOString()
+        }
+      } else {
+        existing.repliedAt = undefined
+      }
+
+      if (existing.status === 'dismissed' && this.isTaskUnresolved(existing)) {
+        existing.status = 'pending'
+        existing.dismissedAt = undefined
+      }
+    },
+
+    getReminderTarget(unresolved: NotificationState[]): NotificationState | null {
+      if (unresolved.length === 0) return null
+
+      const current = this.currentNotification
+      if (current && unresolved.some(notification => notification.id === current.id)) {
+        return current
+      }
+
+      return unresolved[0] ?? null
+    },
+
+    getReminderCandidates() {
+      const pending = this.notifications.filter(
+        notification => notification.status !== 'dismissed' && notification.priority === 'pending'
+      )
+      if (pending.length > 0) {
+        return pending
+      }
+
+      return this.notifications.filter(
+        notification => notification.status !== 'dismissed' && this.isRepliedEscalated(notification)
+      )
+    },
+
+    getNextPendingNotification() {
+      return this.notifications.find(notification => notification.status === 'pending') ?? null
+    },
+
+    async runReminderCycle() {
+      const candidates = this.getReminderCandidates()
+      const target = this.getReminderTarget(candidates)
+      if (!target) {
+        this.clearReminderSignals()
+        await this.hidePopup()
+        return
+      }
+
+      if (isMainWindowActive()) {
+        await this.hidePopup()
+        this.showInAppReminder(candidates.length)
+        this.currentNotification = target
+        return
+      }
+
+      this.hideInAppReminder()
+      await this.showNotification(target.id)
+    },
+
     async setupDismissListener() {
       if (!isTauriRuntime()) return
       if (_dismissEventUnlisten) return
@@ -184,9 +293,7 @@ export const useNotificationStore = defineStore('notifications', {
           }
         })
 
-        _popupClosedUnlisten = await listen('popup-closed', () => {
-          stopRefocusInterval()
-        })
+        _popupClosedUnlisten = await listen('popup-closed', () => {})
       } catch (err) {
         console.warn('Failed to setup dismiss listener:', err)
       }
@@ -222,15 +329,28 @@ export const useNotificationStore = defineStore('notifications', {
     handleNewNotifications(newNotifications: EmergencyNotification[]) {
       for (const notification of newNotifications) {
         const existingIndex = this.notifications.findIndex(n => n.id === notification.id)
-        if (existingIndex !== -1) continue
+        if (existingIndex !== -1) {
+          const existing = this.notifications[existingIndex]
+          if (existing) {
+            this.updateExistingNotification(existing, notification)
+          }
+          continue
+        }
 
         const notificationState = convertToNotificationState(notification)
+        if (notificationState.priority === 'replied') {
+          notificationState.repliedAt = new Date().toISOString()
+        }
         this.notifications.unshift(notificationState)
 
         if (!this.currentNotification) {
           this.showNotification(notificationState.id)
         }
       }
+
+      void this.runReminderCycle().catch(err => {
+        console.warn('Reminder cycle failed:', err)
+      })
 
       this.pruneOldNotifications()
       this.saveToStorage()
@@ -256,7 +376,6 @@ export const useNotificationStore = defineStore('notifications', {
               unreadCount: this.unreadCount,
             },
           })
-          startRefocusInterval()
         } catch (err) {
           console.warn('Failed to show alert popup:', err)
         }
@@ -267,20 +386,34 @@ export const useNotificationStore = defineStore('notifications', {
       const notification = this.notifications.find(n => n.id === notificationId)
       if (!notification) return
 
+      const previousPriority = notification.priority
+
       notification.priority = priority
       notification.category = priority
+
+      if (priority === 'replied') {
+        if (previousPriority !== 'replied') {
+          notification.repliedAt = new Date().toISOString()
+        }
+      } else {
+        notification.repliedAt = undefined
+      }
 
       if (this.currentNotification?.id === notificationId) {
         this.currentNotification.priority = priority
         this.currentNotification.category = priority
+        this.currentNotification.repliedAt = notification.repliedAt
       }
     },
 
-    async replyCurrentTask() {
-      if (!this.currentNotification) return
+    getTaskId(notificationId: string): number | null {
+      const taskId = Number(notificationId)
+      return Number.isFinite(taskId) ? taskId : null
+    },
 
-      const taskId = Number(this.currentNotification.id)
-      if (!Number.isFinite(taskId)) {
+    async replyTaskById(notificationId: string) {
+      const taskId = this.getTaskId(notificationId)
+      if (taskId === null) {
         this.taskActionError = 'Invalid task id'
         return
       }
@@ -291,9 +424,9 @@ export const useNotificationStore = defineStore('notifications', {
       try {
         const status = await replyTask(taskId)
         if (status === 'replied' || status === 'completed' || status === 'ignored' || status === 'pending') {
-          this.setTaskStatus(this.currentNotification.id, status)
+          this.setTaskStatus(notificationId, status)
         } else {
-          this.setTaskStatus(this.currentNotification.id, 'replied')
+          this.setTaskStatus(notificationId, 'replied')
         }
         this.saveToStorage()
       } catch (err) {
@@ -303,11 +436,9 @@ export const useNotificationStore = defineStore('notifications', {
       }
     },
 
-    async completeCurrentTask(result: CompletionResult) {
-      if (!this.currentNotification) return
-
-      const taskId = Number(this.currentNotification.id)
-      if (!Number.isFinite(taskId)) {
+    async completeTaskById(notificationId: string, result: CompletionResult) {
+      const taskId = this.getTaskId(notificationId)
+      if (taskId === null) {
         this.taskActionError = 'Invalid task id'
         return
       }
@@ -317,13 +448,23 @@ export const useNotificationStore = defineStore('notifications', {
 
       try {
         await completeTask(taskId, result)
-        this.setTaskStatus(this.currentNotification.id, 'completed')
-        this.dismissNotificationById(this.currentNotification.id)
+        this.setTaskStatus(notificationId, 'completed')
+        this.dismissNotificationById(notificationId)
       } catch (err) {
         this.taskActionError = err instanceof Error ? err.message : String(err)
       } finally {
         this.isTaskActionPending = false
       }
+    },
+
+    async replyCurrentTask() {
+      if (!this.currentNotification) return
+      await this.replyTaskById(this.currentNotification.id)
+    },
+
+    async completeCurrentTask(result: CompletionResult) {
+      if (!this.currentNotification) return
+      await this.completeTaskById(this.currentNotification.id, result)
     },
 
     dismissNotificationById(notificationId: string) {
@@ -335,9 +476,8 @@ export const useNotificationStore = defineStore('notifications', {
 
       if (this.currentNotification?.id === notificationId) {
         this.currentNotification = null
-        stopRefocusInterval()
 
-        const nextPending = this.notifications.find(n => n.status === 'pending')
+        const nextPending = this.getNextPendingNotification()
         if (nextPending) {
           this.showNotification(nextPending.id)
         } else {
@@ -362,7 +502,7 @@ export const useNotificationStore = defineStore('notifications', {
         }
       }
       this.currentNotification = null
-      stopRefocusInterval()
+      this.hideInAppReminder()
       this.hidePopup()
       this.saveToStorage()
     },

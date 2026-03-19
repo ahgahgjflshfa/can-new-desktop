@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useNotificationStore } from '@/stores/notificationStore'
 import type { NotificationPriority, NotificationState } from '@/types/notification'
+import type { CompletionResult } from '@/services/taskActionService'
 
 const notificationStore = useNotificationStore()
 
@@ -39,6 +40,14 @@ function handleDelete(notificationId: string) {
 
 function handleClearHistory() {
   notificationStore.clearHistory()
+}
+
+function handleReply(notificationId: string) {
+  void notificationStore.replyTaskById(notificationId)
+}
+
+function handleComplete(notificationId: string, result: CompletionResult) {
+  void notificationStore.completeTaskById(notificationId, result)
 }
 
 function getStatusBadge(notification: NotificationState): { text: string; class: string } {
@@ -84,6 +93,13 @@ function getStatusBadge(notification: NotificationState): { text: string; class:
           <span class="i-mdi-delete-sweep mr-1" />
           Clear dismissed
         </button>
+      </div>
+
+      <div
+        v-if="notificationStore.taskActionError"
+        class="mx-4 mt-4 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-400"
+      >
+        {{ notificationStore.taskActionError }}
       </div>
 
       <div v-if="notificationStore.notifications.length === 0" class="p-12 text-center">
@@ -134,6 +150,38 @@ function getStatusBadge(notification: NotificationState): { text: string; class:
                 <span v-if="notification.category" class="uppercase tracking-wider">
                   {{ notification.category }}
                 </span>
+              </div>
+
+              <div v-if="notification.status !== 'dismissed'" class="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  v-if="notification.priority === 'pending'"
+                  type="button"
+                  class="rounded-md bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-500 disabled:opacity-60"
+                  :disabled="notificationStore.isTaskActionPending"
+                  @click="handleReply(notification.id)"
+                >
+                  Reply
+                </button>
+
+                <template v-if="notification.priority === 'replied'">
+                  <button
+                    type="button"
+                    class="rounded-md bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-500 disabled:opacity-60"
+                    :disabled="notificationStore.isTaskActionPending"
+                    @click="handleComplete(notification.id, 'normal')"
+                  >
+                    Complete: Normal
+                  </button>
+
+                  <button
+                    type="button"
+                    class="rounded-md bg-orange-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-orange-500 disabled:opacity-60"
+                    :disabled="notificationStore.isTaskActionPending"
+                    @click="handleComplete(notification.id, 'no_passenger')"
+                  >
+                    Complete: No Passenger
+                  </button>
+                </template>
               </div>
             </div>
 

@@ -31,8 +31,11 @@ const connectionStatusText = computed(() => {
 const lastPollDisplay = computed(() => {
   const lastPoll = notificationStore.pollingStats.lastPollTime
   if (!lastPoll) return 'Never'
-  const seconds = Math.floor((now.value.getTime() - new Date(lastPoll).getTime()) / 1000)
-  if (seconds < 5) return 'Just now'
+
+  const lastPollMs = lastPoll instanceof Date ? lastPoll.getTime() : new Date(lastPoll).getTime()
+  if (!Number.isFinite(lastPollMs)) return 'Never'
+
+  const seconds = Math.max(0, Math.floor((now.value.getTime() - lastPollMs) / 1000))
   if (seconds < 60) return `${seconds}s ago`
   const minutes = Math.floor(seconds / 60)
   return `${minutes}m ago`

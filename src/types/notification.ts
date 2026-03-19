@@ -17,6 +17,7 @@ export interface EmergencyNotification {
 export interface NotificationState extends EmergencyNotification {
   status: NotificationStatus
   dismissedAt?: string
+  repliedAt?: string
 }
 
 export interface NotificationApiResponse {

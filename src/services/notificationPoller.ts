@@ -33,6 +33,7 @@ class NotificationPoller {
   private callbacks: NotificationPollerCallbacks | null = null
   private lastSyncTime: string | null = null
   private isPolling = false
+  private isPollInProgress = false
 
   private stats: PollingStats = {
     lastPollTime: null,
@@ -85,6 +86,9 @@ class NotificationPoller {
 
   async poll(): Promise<void> {
     if (!this.callbacks) return
+    if (this.isPollInProgress) return
+
+    this.isPollInProgress = true
 
     this.stats.pollCount++
 
@@ -98,9 +102,7 @@ class NotificationPoller {
       this.stats.lastError = null
       this.updateNextPollTime()
 
-      if (response.notifications.length > 0) {
-        this.callbacks.onNewNotifications(response.notifications)
-      }
+      this.callbacks.onNewNotifications(response.notifications)
 
       if (this.callbacks.onPollComplete) {
         this.callbacks.onPollComplete(this.getStats())
@@ -119,6 +121,8 @@ class NotificationPoller {
       if (this.callbacks.onPollComplete) {
         this.callbacks.onPollComplete(this.getStats())
       }
+    } finally {
+      this.isPollInProgress = false
     }
   }
 

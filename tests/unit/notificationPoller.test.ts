@@ -94,7 +94,7 @@ describe('notificationPoller', () => {
       poller.stop()
     })
 
-    test('does not call onNewNotifications when no notifications', async () => {
+    test('calls onNewNotifications with empty list when no notifications', async () => {
       mockFetchNotifications.mockResolvedValue(createMockResponse([]))
 
       const poller = createNotificationPoller()
@@ -104,7 +104,7 @@ describe('notificationPoller', () => {
 
       await vi.advanceTimersByTimeAsync(0)
 
-      expect(onNewNotifications).not.toHaveBeenCalled()
+      expect(onNewNotifications).toHaveBeenCalledWith([])
 
       poller.stop()
     })
