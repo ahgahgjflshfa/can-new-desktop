@@ -84,6 +84,27 @@ describe('streamStore', () => {
     expect(video.muted).toBe(true)
   })
 
+  test('play resumes the current video element when stream is already live', async () => {
+    const store = useStreamStore()
+    store.init()
+    store.currentConfig = { sourceType: 'hls', sourceUrl: 'https://example.com/live.m3u8' }
+    store.status = 'live'
+    store.isPlaying = false
+
+    const video = document.createElement('video')
+    Object.defineProperty(video, 'play', {
+      value: vi.fn().mockResolvedValue(undefined),
+      configurable: true,
+    })
+
+    store.attachVideoElement(video)
+    await store.play()
+
+    expect(video.play).toHaveBeenCalledTimes(1)
+    expect(mockPlayerCore.play).not.toHaveBeenCalled()
+    expect(store.isPlaying).toBe(true)
+  })
+
   test('player events update status, stats, and error state', () => {
     const store = useStreamStore()
     store.init()

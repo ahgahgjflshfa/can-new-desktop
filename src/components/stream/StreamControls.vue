@@ -24,7 +24,9 @@ defineEmits<{
   toggleMute: []
 }>()
 
-const canPlay = computed(() => !props.disabled && ['idle', 'stopped', 'error'].includes(props.status))
+const canPlay = computed(
+  () => !props.disabled && !props.isPlaying && ['idle', 'stopped', 'live'].includes(props.status)
+)
 const canPause = computed(() => !props.disabled && props.isPlaying)
 const canStop = computed(
   () => !props.disabled && ['connecting', 'buffering', 'live', 'reconnecting'].includes(props.status)

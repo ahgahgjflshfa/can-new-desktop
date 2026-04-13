@@ -88,6 +88,12 @@ export const useStreamStore = defineStore('stream', {
       this.lastError = null
 
       try {
+        if (this.videoElement && this.status === 'live' && !this.isPlaying) {
+          await this.videoElement.play()
+          this.isPlaying = true
+          return
+        }
+
         await this.playerCore.play()
         this.isPlaying = true
       } catch (err) {
