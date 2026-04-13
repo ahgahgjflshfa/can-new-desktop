@@ -16,7 +16,13 @@ declare module 'vue' {
     GreetComponent: typeof import('./src/components/GreetComponent.vue')['default']
     HomeView: typeof import('./src/components/HomeView.vue')['default']
     LoginView: typeof import('./src/components/LoginView.vue')['default']
+    ManagedStreamPlayer: typeof import('./src/components/stream/ManagedStreamPlayer.vue')['default']
     NotificationsView: typeof import('./src/components/NotificationsView.vue')['default']
     SettingsView: typeof import('./src/components/SettingsView.vue')['default']
+    StreamControls: typeof import('./src/components/stream/StreamControls.vue')['default']
+    StreamErrorPanel: typeof import('./src/components/stream/StreamErrorPanel.vue')['default']
+    StreamPlayer: typeof import('./src/components/stream/StreamPlayer.vue')['default']
+    StreamStatusBadge: typeof import('./src/components/stream/StreamStatusBadge.vue')['default']
+    StreamTestView: typeof import('./src/components/StreamTestView.vue')['default']
   }
 }

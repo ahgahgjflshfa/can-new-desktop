@@ -11,6 +11,7 @@ const isSidebarCollapsed = ref(false)
 const navItems = [
   { id: 'home', label: 'Home', icon: 'i-mdi-home' },
   { id: 'notifications', label: 'Alerts', icon: 'i-mdi-bell-ring' },
+  { id: 'stream-test', label: 'Stream Test', icon: 'i-mdi-play-box-multiple' },
   { id: 'settings', label: 'Settings', icon: 'i-mdi-cog' },
 ] as const
 

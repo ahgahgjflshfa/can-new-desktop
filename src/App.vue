@@ -4,6 +4,7 @@ import HomeView from './components/HomeView.vue'
 import SettingsView from './components/SettingsView.vue'
 import NotificationsView from './components/NotificationsView.vue'
 import LoginView from './components/LoginView.vue'
+import StreamTestView from './components/StreamTestView.vue'
 import { useStore } from '@/store'
 import { useAuthStore } from '@/stores/authStore'
 import { useNotificationStore } from '@/stores/notificationStore'
@@ -51,5 +52,6 @@ watch(
     <HomeView v-if="store.currentView === 'home'" />
     <SettingsView v-else-if="store.currentView === 'settings'" />
     <NotificationsView v-else-if="store.currentView === 'notifications'" />
+    <StreamTestView v-else-if="store.currentView === 'stream-test'" />
   </AppShell>
 </template>

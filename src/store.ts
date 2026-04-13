@@ -61,7 +61,7 @@ export const useStore = defineStore('main', {
     version: versionString,
     isInitialized: false,
     name: '',
-    currentView: 'home' as 'home' | 'settings' | 'notifications',
+    currentView: 'home' as 'home' | 'settings' | 'notifications' | 'stream-test',
     sidebarCollapsed: false,
     minimizeToTrayOnClose: false,
     themePreference: 'system' as ThemePreference,

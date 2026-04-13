@@ -1,22 +1,28 @@
-export type StreamStatus = 'idle' | 'connecting' | 'live' | 'reconnecting' | 'error';
+export type StreamStatus = 'idle' | 'connecting' | 'buffering' | 'live' | 'reconnecting' | 'error' | 'stopped'
 
-export type StreamErrorCode = 'unauthorized' | 'network_timeout' | 'source_unavailable' | 'unknown';
+export type StreamErrorCode =
+  | 'auth_failed'
+  | 'network_timeout'
+  | 'source_unavailable'
+  | 'unsupported_format'
+  | 'unknown'
 
-export type StreamSourceType = 'mock' | 'webrtc' | 'hls';
+export type StreamSourceType = 'mock' | 'webrtc' | 'hls'
 
 export type StreamError = {
-  code: StreamErrorCode,
-  message: string,
-  retryable: boolean,
-  timestamp: number,
+  code: StreamErrorCode
+  message: string
+  retryable: boolean
+  timestamp: number
 }
 
 export type StreamStats = {
-  startupTimeMs: number,
-  reconnectCount: number,
-  bufferCount: number,
+  startupTimeMs: number
+  reconnectCount: number
+  bufferCount: number
 }
 
 export type StreamConfig = {
-  sourceType: StreamSourceType,
+  sourceType: StreamSourceType
+  sourceUrl: string
 }
