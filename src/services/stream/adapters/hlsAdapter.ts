@@ -132,12 +132,12 @@ export class HLSAdapter implements StreamAdapter {
       })
 
       hls.on(Hls.Events.ERROR, (_event, data) => {
-        const code = this.mapHlsError(data)
-        this.emit({ type: 'error', code, message: data?.details ?? 'HLS playback error' })
-
         if (!data?.fatal) {
           return
         }
+
+        const code = this.mapHlsError(data)
+        this.emit({ type: 'error', code, message: data?.details ?? 'HLS playback error' })
 
         if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
           this.reconnectCount += 1

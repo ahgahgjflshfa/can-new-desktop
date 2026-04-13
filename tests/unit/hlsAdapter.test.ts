@@ -146,6 +146,30 @@ describe('HLSAdapter', () => {
     expect(hlsInstances[0]?.startLoad).toHaveBeenCalled()
   })
 
+  test('non-fatal hls warnings do not emit playback errors', async () => {
+    const adapter = new HLSAdapter()
+    const video = createVideoElement()
+    const errorHandler = vi.fn()
+
+    adapter.onEvent(event => {
+      if (event.type === 'error') {
+        errorHandler(event)
+      }
+    })
+
+    await adapter.connect({ sourceUrl: 'https://example.com/live.m3u8' })
+    adapter.attach(video)
+    await adapter.start()
+
+    hlsInstances[0]?.emit(FakeHls.Events.ERROR, {
+      fatal: false,
+      type: FakeHls.ErrorTypes.MEDIA_ERROR,
+      details: 'bufferSeekOverHole',
+    })
+
+    expect(errorHandler).not.toHaveBeenCalled()
+  })
+
   test('falls back to native hls when MSE is unavailable', async () => {
     FakeHls.isSupported.mockReturnValue(false)
 
