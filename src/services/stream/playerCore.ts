@@ -1,65 +1,145 @@
-import type { StreamConfig, StreamError, StreamStats, StreamStatus } from '@/types/stream'
-import { AdapterFactory } from './adapters/factory'
-import type { AdapterEvent, StreamAdapter } from './adapters/types'
+import Hls from 'hls.js'
+import type { StreamConfig, StreamError, StreamErrorCode, StreamStats } from '@/types/stream'
 
-export type PlayerCoreEvent =
-  | { type: 'status'; status: StreamStatus }
-  | { type: 'error'; error: StreamError }
-  | { type: 'stats'; stats: StreamStats }
+export type PlayerStatus = 'idle' | 'loading' | 'live' | 'buffering' | 'paused' | 'reconnecting' | 'error' | 'stopped'
 
-export interface PlayerCore {
-  load(config: StreamConfig): Promise<void>
-  attach(videoEl: HTMLVideoElement): void
-  play(): Promise<void>
-  pause(): void
-  stop(): Promise<void>
-  reconnect(): Promise<void>
-  dispose(): Promise<void>
-  getStatus(): StreamStatus
-  getLastError(): StreamError | null
-  onEvent(handler: (event: PlayerCoreEvent) => void): () => void
+export interface PlayerState {
+  status: PlayerStatus
+  error: StreamError | null
+  stats: StreamStats | null
+  hasLoadedSource: boolean
 }
 
-export class DefaultPlayerCore implements PlayerCore {
-  constructor(private readonly createAdapter: typeof AdapterFactory = AdapterFactory) {}
+export class HlsPlayerController {
+  private static readonly STALL_TIMEOUT_MS = 12000
+  private static readonly MAX_RECOVERY_ATTEMPTS = 3
 
-  private adapter: StreamAdapter | null = null
-  private config: StreamConfig | null = null
   private videoEl: HTMLVideoElement | null = null
-  private status: StreamStatus = 'idle'
-  private lastError: StreamError | null = null
-  private unsubscribeAdapter: (() => void) | null = null
-  private listeners = new Set<(event: PlayerCoreEvent) => void>()
-
-  async load(config: StreamConfig): Promise<void> {
-    await this.teardownCurrentAdapter()
-
-    this.config = config
-    this.adapter = this.createAdapter(config.sourceType)
-    this.unsubscribeAdapter = this.adapter.onEvent(event => this.handleAdapterEvent(event))
-
-    this.setStatus('connecting')
-    await this.adapter.connect({ sourceUrl: config.sourceUrl })
-
-    if (this.videoEl) {
-      this.adapter.attach(this.videoEl)
-    }
-  }
+  private hls: Hls | null = null
+  private config: StreamConfig | null = null
+  private state: PlayerState = this.createInitialState()
+  private listeners = new Set<(state: PlayerState) => void>()
+  private removeVideoListeners: (() => void) | null = null
+  private stallTimer: ReturnType<typeof setTimeout> | null = null
+  private startupStartedAt = 0
+  private reconnectCount = 0
+  private bufferCount = 0
+  private recoveryAttempts = 0
+  private shouldAutoplay = false
+  private isStopping = false
+  private currentLoadToken = 0
 
   attach(videoEl: HTMLVideoElement): void {
+    this.detach()
     this.videoEl = videoEl
+    this.bindVideoListeners(videoEl)
+  }
 
-    if (this.adapter) {
-      this.adapter.attach(videoEl)
+  detach(): void {
+    if (this.removeVideoListeners) {
+      this.removeVideoListeners()
+      this.removeVideoListeners = null
     }
+
+    this.videoEl = null
+  }
+
+  async load(config: StreamConfig, options: { autoplay?: boolean } = {}): Promise<void> {
+    this.config = config
+    this.shouldAutoplay = options.autoplay ?? false
+    this.currentLoadToken += 1
+    const loadToken = this.currentLoadToken
+
+    this.startupStartedAt = Date.now()
+    this.recoveryAttempts = 0
+    this.patchState({
+      status: 'loading',
+      error: null,
+      hasLoadedSource: false,
+      stats: this.state.stats,
+    })
+
+    this.destroyHls()
+
+    if (!this.videoEl) {
+      return
+    }
+
+    if (Hls.isSupported()) {
+      const hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: true,
+      })
+
+      hls.on(Hls.Events.MANIFEST_PARSED, async () => {
+        if (loadToken !== this.currentLoadToken || !this.videoEl) {
+          return
+        }
+
+        if (this.shouldAutoplay) {
+          await this.tryPlay(this.videoEl)
+        }
+      })
+
+      hls.on(Hls.Events.ERROR, (_event, data) => {
+        if (loadToken !== this.currentLoadToken) {
+          return
+        }
+
+        if (!data?.fatal) {
+          return
+        }
+
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR || data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+          this.handleRecoverableError(data.type === Hls.ErrorTypes.NETWORK_ERROR ? 'network_timeout' : 'unknown')
+
+          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+            hls.startLoad()
+          } else {
+            hls.recoverMediaError()
+          }
+
+          return
+        }
+
+        this.fail(this.mapHlsError(data), data?.details ?? 'HLS playback error', false)
+      })
+
+      hls.loadSource(config.sourceUrl)
+      hls.attachMedia(this.videoEl)
+      this.hls = hls
+      return
+    }
+
+    if (this.videoEl.canPlayType('application/vnd.apple.mpegurl')) {
+      this.videoEl.src = config.sourceUrl
+      this.videoEl.load()
+
+      if (this.shouldAutoplay) {
+        await this.tryPlay(this.videoEl)
+      }
+
+      return
+    }
+
+    this.fail('unsupported_format', 'This environment does not support HLS playback', false)
   }
 
   async play(): Promise<void> {
-    if (!this.adapter) {
-      throw new Error('load must be called before play')
+    if (!this.videoEl) {
+      throw new Error('video element is not attached')
     }
 
-    await this.adapter.start()
+    if (!this.config) {
+      throw new Error('stream source is not loaded')
+    }
+
+    if (this.state.status === 'stopped' || this.state.status === 'error' || !this.state.hasLoadedSource) {
+      await this.load(this.config, { autoplay: true })
+      return
+    }
+
+    await this.tryPlay(this.videoEl)
   }
 
   pause(): void {
@@ -67,114 +147,275 @@ export class DefaultPlayerCore implements PlayerCore {
   }
 
   async stop(): Promise<void> {
-    if (!this.adapter) {
-      return
-    }
+    this.isStopping = true
+    this.clearStallTimer()
+    this.shouldAutoplay = false
+    this.recoveryAttempts = 0
 
-    await this.adapter.stop()
-  }
-
-  async reconnect(): Promise<void> {
-    if (!this.adapter || !this.config) {
-      throw new Error('load must be called before reconnect')
-    }
-
-    this.setStatus('reconnecting')
-    await this.adapter.stop()
-    await this.adapter.disconnect()
-    await this.adapter.connect({ sourceUrl: this.config.sourceUrl })
+    this.destroyHls()
 
     if (this.videoEl) {
-      this.adapter.attach(this.videoEl)
+      this.videoEl.pause()
+      this.videoEl.removeAttribute('src')
+      this.videoEl.load()
     }
 
-    await this.adapter.start()
+    this.patchState({ status: 'stopped', error: null, hasLoadedSource: true })
+    this.isStopping = false
+  }
+
+  async retry(): Promise<void> {
+    if (!this.config) {
+      throw new Error('stream source is not loaded')
+    }
+
+    this.reconnectCount += 1
+    this.patchState({ status: 'reconnecting', error: null })
+    await this.load(this.config, { autoplay: true })
   }
 
   async dispose(): Promise<void> {
-    await this.teardownCurrentAdapter()
-    this.videoEl = null
-    this.status = 'idle'
-    this.lastError = null
+    this.clearStallTimer()
+    this.shouldAutoplay = false
+    this.recoveryAttempts = 0
+    this.destroyHls()
+
+    if (this.videoEl) {
+      this.videoEl.pause()
+      this.videoEl.removeAttribute('src')
+      this.videoEl.load()
+    }
+
+    this.detach()
+    this.state = this.createInitialState()
   }
 
-  getStatus(): StreamStatus {
-    return this.status
+  setMuted(muted: boolean): void {
+    if (this.videoEl) {
+      this.videoEl.muted = muted
+    }
   }
 
-  getLastError(): StreamError | null {
-    return this.lastError
+  getState(): PlayerState {
+    return this.cloneState()
   }
 
-  onEvent(handler: (event: PlayerCoreEvent) => void): () => void {
+  onStateChange(handler: (state: PlayerState) => void): () => void {
     this.listeners.add(handler)
     return () => {
       this.listeners.delete(handler)
     }
   }
 
-  private async teardownCurrentAdapter(): Promise<void> {
-    if (this.adapter) {
-      await this.adapter.disconnect()
-    }
-
-    if (this.unsubscribeAdapter) {
-      this.unsubscribeAdapter()
-      this.unsubscribeAdapter = null
-    }
-
-    this.adapter = null
-  }
-
-  private handleAdapterEvent(event: AdapterEvent): void {
-    if (event.type === 'buffering') {
-      this.setStatus('buffering')
-      return
-    }
-
-    if (event.type === 'started') {
-      this.setStatus('live')
-      return
-    }
-
-    if (event.type === 'stopped') {
-      if (this.status === 'reconnecting') {
+  private bindVideoListeners(videoEl: HTMLVideoElement): void {
+    const onPlay = () => {
+      if (this.isStopping) {
         return
       }
 
-      this.setStatus('stopped')
-      return
+      this.recoveryAttempts = 0
+      this.patchState({ status: 'live', error: null, hasLoadedSource: true })
     }
 
-    if (event.type === 'stats') {
-      this.emit({ type: 'stats', stats: event.stats })
-      return
-    }
-
-    if (event.type === 'error') {
-      this.lastError = {
-        code: event.code,
-        message: event.message,
-        retryable: event.code === 'network_timeout' || event.code === 'source_unavailable',
-        timestamp: Date.now(),
+    const onPlaying = () => {
+      if (this.isStopping) {
+        return
       }
-      this.setStatus('error')
-      this.emit({ type: 'error', error: this.lastError })
+
+      this.recoveryAttempts = 0
+      this.patchState({ status: 'live', error: null, hasLoadedSource: true })
+    }
+
+    const onWaiting = () => {
+      if (this.isStopping || this.state.status === 'paused') {
+        return
+      }
+
+      this.bufferCount += 1
+      this.patchState({ status: this.state.hasLoadedSource ? 'buffering' : 'loading' })
+    }
+
+    const onPause = () => {
+      if (this.isStopping) {
+        return
+      }
+
+      this.patchState({ status: 'paused' })
+    }
+
+    const onEnded = () => {
+      this.patchState({ status: 'stopped' })
+    }
+
+    const onError = () => {
+      if (this.isStopping) {
+        return
+      }
+
+      const mediaError = videoEl.error
+      const unsupportedCode = typeof MediaError === 'undefined' ? 4 : MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED
+      const code: StreamErrorCode = mediaError?.code === unsupportedCode ? 'unsupported_format' : 'unknown'
+      this.fail(code, mediaError?.message || 'Video element playback error', false)
+    }
+
+    videoEl.addEventListener('play', onPlay)
+    videoEl.addEventListener('playing', onPlaying)
+    videoEl.addEventListener('waiting', onWaiting)
+    videoEl.addEventListener('pause', onPause)
+    videoEl.addEventListener('ended', onEnded)
+    videoEl.addEventListener('error', onError)
+
+    this.removeVideoListeners = () => {
+      videoEl.removeEventListener('play', onPlay)
+      videoEl.removeEventListener('playing', onPlaying)
+      videoEl.removeEventListener('waiting', onWaiting)
+      videoEl.removeEventListener('pause', onPause)
+      videoEl.removeEventListener('ended', onEnded)
+      videoEl.removeEventListener('error', onError)
     }
   }
 
-  private setStatus(status: StreamStatus): void {
-    this.status = status
-    this.emit({ type: 'status', status })
+  private async tryPlay(videoEl: HTMLVideoElement): Promise<void> {
+    try {
+      await videoEl.play()
+    } catch (error) {
+      this.fail('unknown', error instanceof Error ? error.message : 'Unable to start video playback', false)
+      throw error instanceof Error ? error : new Error(String(error))
+    }
   }
 
-  private emit(event: PlayerCoreEvent): void {
+  private handleRecoverableError(code: StreamErrorCode): void {
+    this.recoveryAttempts += 1
+
+    if (this.recoveryAttempts >= HlsPlayerController.MAX_RECOVERY_ATTEMPTS) {
+      this.fail(code, 'Playback recovery attempts exceeded', true)
+      return
+    }
+
+    this.reconnectCount += 1
+    this.patchState({
+      status: this.state.hasLoadedSource ? 'buffering' : 'reconnecting',
+      error: null,
+    })
+  }
+
+  private mapHlsError(
+    data: { response?: { code?: number }; details?: string; type?: string } | undefined
+  ): StreamErrorCode {
+    if (data?.response?.code === 401 || data?.response?.code === 403) {
+      return 'auth_failed'
+    }
+
+    if (data?.type === Hls.ErrorTypes.NETWORK_ERROR) {
+      return 'network_timeout'
+    }
+
+    if (data?.details?.toLowerCase().includes('manifest')) {
+      return 'source_unavailable'
+    }
+
+    return 'unknown'
+  }
+
+  private fail(code: StreamErrorCode, message: string, retryable: boolean): void {
+    this.clearStallTimer()
+    this.patchState({
+      status: 'error',
+      error: {
+        code,
+        message,
+        retryable,
+        timestamp: Date.now(),
+      },
+    })
+  }
+
+  private patchState(patch: Partial<PlayerState>): void {
+    this.state = {
+      ...this.state,
+      ...patch,
+      stats: {
+        startupTimeMs: this.startupStartedAt > 0 ? Date.now() - this.startupStartedAt : 0,
+        reconnectCount: this.reconnectCount,
+        bufferCount: this.bufferCount,
+      },
+    }
+
+    this.syncStallTimer()
+    const snapshot = this.cloneState()
     for (const handler of this.listeners) {
-      handler(event)
+      handler(snapshot)
+    }
+  }
+
+  private syncStallTimer(): void {
+    if (!['loading', 'buffering', 'reconnecting'].includes(this.state.status)) {
+      this.clearStallTimer()
+      return
+    }
+
+    this.clearStallTimer()
+    this.stallTimer = setTimeout(() => {
+      void this.handleStallTimeout()
+    }, HlsPlayerController.STALL_TIMEOUT_MS)
+  }
+
+  private clearStallTimer(): void {
+    if (!this.stallTimer) {
+      return
+    }
+
+    clearTimeout(this.stallTimer)
+    this.stallTimer = null
+  }
+
+  private async handleStallTimeout(): Promise<void> {
+    this.clearStallTimer()
+
+    if (!this.config || !['loading', 'buffering', 'reconnecting'].includes(this.state.status)) {
+      return
+    }
+
+    if (this.state.status === 'reconnecting') {
+      this.fail('network_timeout', 'Playback stalled during reconnect', true)
+      return
+    }
+
+    await this.retry()
+  }
+
+  private destroyHls(): void {
+    if (!this.hls) {
+      return
+    }
+
+    this.hls.detachMedia()
+    this.hls.destroy()
+    this.hls = null
+  }
+
+  private createInitialState(): PlayerState {
+    return {
+      status: 'idle',
+      error: null,
+      stats: {
+        startupTimeMs: 0,
+        reconnectCount: 0,
+        bufferCount: 0,
+      },
+      hasLoadedSource: false,
+    }
+  }
+
+  private cloneState(): PlayerState {
+    return {
+      ...this.state,
+      error: this.state.error ? { ...this.state.error } : null,
+      stats: this.state.stats ? { ...this.state.stats } : null,
     }
   }
 }
 
-export function createPlayerCore(): PlayerCore {
-  return new DefaultPlayerCore()
+export function createPlayerController(): HlsPlayerController {
+  return new HlsPlayerController()
 }

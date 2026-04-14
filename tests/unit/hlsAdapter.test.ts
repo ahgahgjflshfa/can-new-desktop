@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest'
-import { HLSAdapter } from '@/services/stream/adapters/hlsAdapter'
+import { HlsPlayerController } from '@/services/stream/playerCore'
 
 type HlsHandler = (event?: unknown, data?: any) => void
 
@@ -8,9 +8,7 @@ const { FakeHls, hlsInstances } = vi.hoisted(() => {
 
   class FakeHls {
     static isSupported = vi.fn(() => true)
-    static Events = {
-      ERROR: 'error',
-    }
+    static Events = { MANIFEST_PARSED: 'manifestParsed', ERROR: 'error' }
     static ErrorTypes = {
       NETWORK_ERROR: 'networkError',
       MEDIA_ERROR: 'mediaError',
@@ -41,149 +39,55 @@ const { FakeHls, hlsInstances } = vi.hoisted(() => {
     }
   }
 
-  return {
-    FakeHls,
-    hlsInstances: instances,
-  }
+  return { FakeHls, hlsInstances: instances }
 })
 
-vi.mock('hls.js', () => ({
-  default: FakeHls,
-}))
+vi.mock('hls.js', () => ({ default: FakeHls }))
 
 function createVideoElement(): HTMLVideoElement {
   const video = document.createElement('video')
-  const canPlayType = vi.fn(() => '')
-
-  Object.defineProperty(video, 'play', {
-    value: vi.fn().mockResolvedValue(undefined),
-    configurable: true,
-  })
-  Object.defineProperty(video, 'pause', {
-    value: vi.fn(),
-    configurable: true,
-  })
-  Object.defineProperty(video, 'load', {
-    value: vi.fn(),
-    configurable: true,
-  })
-  Object.defineProperty(video, 'canPlayType', {
-    value: canPlayType,
-    configurable: true,
-  })
+  Object.defineProperty(video, 'play', { value: vi.fn().mockResolvedValue(undefined), configurable: true })
+  Object.defineProperty(video, 'pause', { value: vi.fn(), configurable: true })
+  Object.defineProperty(video, 'load', { value: vi.fn(), configurable: true })
+  Object.defineProperty(video, 'canPlayType', { value: vi.fn(() => ''), configurable: true })
   return video
 }
 
-describe('HLSAdapter', () => {
+describe('conventional HLS controller recovery', () => {
   beforeEach(() => {
     hlsInstances.length = 0
     vi.clearAllMocks()
     FakeHls.isSupported.mockReturnValue(true)
   })
 
-  test('connect attach start emits expected lifecycle', async () => {
-    const adapter = new HLSAdapter()
+  test('recoverable network errors restart loading without immediate fatal state', async () => {
+    const controller = new HlsPlayerController()
     const video = createVideoElement()
-    const events: string[] = []
+    controller.attach(video)
 
-    adapter.onEvent(event => {
-      events.push(event.type)
-    })
-
-    await adapter.connect({ sourceUrl: 'https://example.com/live.m3u8' })
-    adapter.attach(video)
-    await adapter.start()
-    video.dispatchEvent(new Event('playing'))
-
-    expect(events).toEqual(['connected', 'buffering', 'started', 'stats'])
-    expect(hlsInstances).toHaveLength(1)
-    expect(hlsInstances[0]?.loadSource).toHaveBeenCalledWith('https://example.com/live.m3u8')
-    expect(hlsInstances[0]?.attachMedia).toHaveBeenCalledWith(video)
-  })
-
-  test('unsubscribe stops receiving events', async () => {
-    const adapter = new HLSAdapter()
-    const video = createVideoElement()
-    const handler = vi.fn()
-
-    const unsubscribe = adapter.onEvent(handler)
-
-    await adapter.connect({ sourceUrl: 'https://example.com/live.m3u8' })
-    unsubscribe()
-    adapter.attach(video)
-    await adapter.start()
-    video.dispatchEvent(new Event('playing'))
-
-    expect(handler).toHaveBeenCalledTimes(1)
-    expect(handler).toHaveBeenCalledWith({ type: 'connected' })
-  })
-
-  test('fatal network errors emit retryable error and restart loading', async () => {
-    const adapter = new HLSAdapter()
-    const video = createVideoElement()
-    const events: Array<{ type: string; code?: string }> = []
-
-    adapter.onEvent(event => {
-      if (event.type === 'error') {
-        events.push({ type: event.type, code: event.code })
-        return
-      }
-
-      events.push({ type: event.type })
-    })
-
-    await adapter.connect({ sourceUrl: 'https://example.com/live.m3u8' })
-    adapter.attach(video)
-    await adapter.start()
-
+    await controller.load({ sourceType: 'hls', sourceUrl: 'https://example.com/live.m3u8' }, { autoplay: true })
     hlsInstances[0]?.emit(FakeHls.Events.ERROR, {
       fatal: true,
       type: FakeHls.ErrorTypes.NETWORK_ERROR,
-      details: 'manifest load failed',
+      details: 'network failed',
     })
 
-    expect(events).toContainEqual({ type: 'error', code: 'network_timeout' })
     expect(hlsInstances[0]?.startLoad).toHaveBeenCalled()
+    expect(controller.getState().status).not.toBe('error')
   })
 
-  test('non-fatal hls warnings do not emit playback errors', async () => {
-    const adapter = new HLSAdapter()
+  test('fatal unrecoverable errors become error state', async () => {
+    const controller = new HlsPlayerController()
     const video = createVideoElement()
-    const errorHandler = vi.fn()
+    controller.attach(video)
 
-    adapter.onEvent(event => {
-      if (event.type === 'error') {
-        errorHandler(event)
-      }
-    })
-
-    await adapter.connect({ sourceUrl: 'https://example.com/live.m3u8' })
-    adapter.attach(video)
-    await adapter.start()
-
+    await controller.load({ sourceType: 'hls', sourceUrl: 'https://example.com/live.m3u8' }, { autoplay: true })
     hlsInstances[0]?.emit(FakeHls.Events.ERROR, {
-      fatal: false,
-      type: FakeHls.ErrorTypes.MEDIA_ERROR,
-      details: 'bufferSeekOverHole',
+      fatal: true,
+      type: FakeHls.ErrorTypes.OTHER_ERROR,
+      details: 'manifest broken',
     })
 
-    expect(errorHandler).not.toHaveBeenCalled()
-  })
-
-  test('falls back to native hls when MSE is unavailable', async () => {
-    FakeHls.isSupported.mockReturnValue(false)
-
-    const adapter = new HLSAdapter()
-    const video = createVideoElement()
-    const canPlayType = video.canPlayType as unknown as ReturnType<typeof vi.fn>
-    canPlayType.mockReturnValue('probably')
-
-    await adapter.connect({ sourceUrl: 'https://example.com/live.m3u8' })
-    adapter.attach(video)
-    await adapter.start()
-
-    expect(video.src).toContain('https://example.com/live.m3u8')
-    expect(video.load).toHaveBeenCalled()
-    expect(video.play).toHaveBeenCalled()
+    expect(controller.getState().status).toBe('error')
   })
 })

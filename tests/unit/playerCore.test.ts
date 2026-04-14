@@ -1,62 +1,107 @@
-import { describe, expect, test, vi } from 'vitest'
-import type { StreamAdapter } from '@/services/stream/adapters/types'
-import { DefaultPlayerCore } from '@/services/stream/playerCore'
+import { beforeEach, describe, expect, test, vi } from 'vitest'
+import Hls from 'hls.js'
+import { HlsPlayerController } from '@/services/stream/playerCore'
 
-function createAdapterMock(): StreamAdapter {
-  const handlers = new Set<(event: any) => void>()
+type HlsHandler = (event?: unknown, data?: any) => void
 
-  return {
-    connect: vi.fn().mockImplementation(async () => {
-      handlers.forEach(handler => handler({ type: 'connected' }))
-    }),
-    disconnect: vi.fn().mockImplementation(async () => {
-      handlers.forEach(handler => handler({ type: 'disconnected' }))
-    }),
-    attach: vi.fn(),
-    detach: vi.fn(),
-    start: vi.fn().mockImplementation(async () => {
-      handlers.forEach(handler => handler({ type: 'buffering' }))
-      handlers.forEach(handler => handler({ type: 'started' }))
-    }),
-    stop: vi.fn().mockImplementation(async () => {
-      handlers.forEach(handler => handler({ type: 'stopped' }))
-    }),
-    onEvent: vi.fn().mockImplementation(handler => {
-      handlers.add(handler)
-      return () => handlers.delete(handler)
-    }),
+const { FakeHls, hlsInstances } = vi.hoisted(() => {
+  const instances: FakeHls[] = []
+
+  class FakeHls {
+    static isSupported = vi.fn(() => true)
+    static Events = {
+      MANIFEST_PARSED: 'manifestParsed',
+      ERROR: 'error',
+    }
+    static ErrorTypes = {
+      NETWORK_ERROR: 'networkError',
+      MEDIA_ERROR: 'mediaError',
+      OTHER_ERROR: 'otherError',
+    }
+
+    public destroy = vi.fn()
+    public detachMedia = vi.fn()
+    public attachMedia = vi.fn()
+    public loadSource = vi.fn()
+    public startLoad = vi.fn()
+    public recoverMediaError = vi.fn()
+    private handlers = new Map<string, HlsHandler[]>()
+
+    constructor(_config?: unknown) {
+      instances.push(this)
+    }
+
+    on(event: string, handler: HlsHandler): void {
+      const handlers = this.handlers.get(event) ?? []
+      handlers.push(handler)
+      this.handlers.set(event, handlers)
+    }
+
+    emit(event: string, data?: any): void {
+      const handlers = this.handlers.get(event) ?? []
+      handlers.forEach(handler => handler(undefined, data))
+    }
   }
+
+  return { FakeHls, hlsInstances: instances }
+})
+
+vi.mock('hls.js', () => ({ default: FakeHls }))
+
+function createVideoElement(): HTMLVideoElement {
+  const video = document.createElement('video')
+  Object.defineProperty(video, 'play', { value: vi.fn().mockResolvedValue(undefined), configurable: true })
+  Object.defineProperty(video, 'pause', { value: vi.fn(), configurable: true })
+  Object.defineProperty(video, 'load', { value: vi.fn(), configurable: true })
+  Object.defineProperty(video, 'canPlayType', { value: vi.fn(() => ''), configurable: true })
+  return video
 }
 
-describe('DefaultPlayerCore', () => {
-  test('load then play moves status to live', async () => {
-    const adapter = createAdapterMock()
-    const core = new DefaultPlayerCore(() => adapter)
-    const statuses: string[] = []
-
-    core.onEvent(event => {
-      if (event.type === 'status') {
-        statuses.push(event.status)
-      }
-    })
-
-    await core.load({ sourceType: 'hls', sourceUrl: 'https://example.com/live.m3u8' })
-    await core.play()
-
-    expect(statuses).toEqual(['connecting', 'buffering', 'live'])
-    expect(core.getStatus()).toBe('live')
+describe('HlsPlayerController', () => {
+  beforeEach(() => {
+    hlsInstances.length = 0
+    vi.clearAllMocks()
+    FakeHls.isSupported.mockReturnValue(true)
   })
 
-  test('reconnect restarts the same source', async () => {
-    const adapter = createAdapterMock()
-    const core = new DefaultPlayerCore(() => adapter)
+  test('load with autoplay enters live after playing event', async () => {
+    const controller = new HlsPlayerController()
+    const video = createVideoElement()
+    controller.attach(video)
 
-    await core.load({ sourceType: 'hls', sourceUrl: 'https://example.com/live.m3u8' })
-    await core.reconnect()
+    await controller.load({ sourceType: 'hls', sourceUrl: 'https://example.com/live.m3u8' }, { autoplay: true })
+    hlsInstances[0]?.emit(FakeHls.Events.MANIFEST_PARSED)
+    video.dispatchEvent(new Event('playing'))
 
-    expect(adapter.stop).toHaveBeenCalledTimes(1)
-    expect(adapter.disconnect).toHaveBeenCalledTimes(1)
-    expect(adapter.connect).toHaveBeenNthCalledWith(1, { sourceUrl: 'https://example.com/live.m3u8' })
-    expect(adapter.connect).toHaveBeenNthCalledWith(2, { sourceUrl: 'https://example.com/live.m3u8' })
+    expect(controller.getState().status).toBe('live')
+  })
+
+  test('pause moves player into paused state', async () => {
+    const controller = new HlsPlayerController()
+    const video = createVideoElement()
+    controller.attach(video)
+
+    await controller.load({ sourceType: 'hls', sourceUrl: 'https://example.com/live.m3u8' }, { autoplay: true })
+    hlsInstances[0]?.emit(FakeHls.Events.MANIFEST_PARSED)
+    video.dispatchEvent(new Event('playing'))
+    controller.pause()
+    video.dispatchEvent(new Event('pause'))
+
+    expect(controller.getState().status).toBe('paused')
+  })
+
+  test('stall timeout retries playback after buffering persists', async () => {
+    vi.useFakeTimers()
+
+    const controller = new HlsPlayerController()
+    const video = createVideoElement()
+    controller.attach(video)
+
+    await controller.load({ sourceType: 'hls', sourceUrl: 'https://example.com/live.m3u8' }, { autoplay: true })
+    video.dispatchEvent(new Event('waiting'))
+    await vi.advanceTimersByTimeAsync(12000)
+
+    expect(hlsInstances.length).toBeGreaterThan(1)
+    vi.useRealTimers()
   })
 })
