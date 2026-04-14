@@ -32,15 +32,14 @@ src-tauri/
 
 ## COMMANDS (lib.rs)
 
-| Command                                           | Purpose                                        |
-| ------------------------------------------------- | ---------------------------------------------- |
-| `show_alert_popup`                                | Create/show popup, store notification in state |
-| `hide_alert_popup`                                | Hide popup window                              |
-| `focus_alert_popup`                               | Refocus popup (called every 5s by frontend)    |
-| `emit_dismiss_notification`                       | Popup→Main IPC for dismiss                     |
-| `get_pending_notification`                        | Popup pulls notification on mount              |
-| `set_minimize_to_tray_on_close`                   | Toggle minimize behavior                       |
-| `show_emergency_window` / `hide_emergency_window` | Main window control                            |
+| Command                         | Purpose                                        |
+| ------------------------------- | ---------------------------------------------- |
+| `show_alert_popup`              | Create/show popup, store notification in state |
+| `hide_alert_popup`              | Hide popup window                              |
+| `emit_dismiss_notification`     | Popup→Main IPC for dismiss                     |
+| `get_pending_notification`      | Popup pulls notification on mount              |
+| `set_minimize_to_tray_on_close` | Toggle minimize behavior                       |
+| `show_emergency_window`         | Main window always-on-top control              |
 
 ## STATE MANAGEMENT
 
@@ -118,6 +117,6 @@ cargo fmt --manifest-path src-tauri/Cargo.toml
 
 ## GOTCHAS
 
-- **Popup close → refocus loop**: X button triggers `on_window_event` which emits `popup-closed` to stop refocus interval
+- **Popup close behavior**: X button triggers `on_window_event` which hides the popup window instead of destroying it
 - **Debug builds**: DevTools auto-open via `#[cfg(debug_assertions)]` in setup
 - **Window creation**: Uses `WebviewWindowBuilder` with `WebviewUrl::External` (dev) vs `WebviewUrl::App` (prod)

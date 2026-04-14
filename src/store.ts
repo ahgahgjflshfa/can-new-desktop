@@ -60,7 +60,6 @@ export const useStore = defineStore('main', {
     debug: import.meta.env.MODE === 'development',
     version: versionString,
     isInitialized: false,
-    name: '',
     currentView: 'home' as 'home' | 'settings' | 'notifications' | 'stream-test',
     sidebarCollapsed: false,
     minimizeToTrayOnClose: false,
@@ -165,13 +164,6 @@ export const useStore = defineStore('main', {
   getters: {
     isReady: state => {
       return !state.isInitialized
-    },
-
-    storeGreet: state => {
-      if (state.name.length > 0) {
-        return `Greetings from Pinia store, ${state.name}!`
-      }
-      return ''
     },
   },
 })

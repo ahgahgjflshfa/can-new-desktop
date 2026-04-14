@@ -6,10 +6,17 @@ use tauri::{AppHandle, Manager, Runtime};
 
 use crate::state::MinimizeToTrayState;
 
+const MAIN_WINDOW_LABEL: &str = "main";
 const MAIN_TRAY_ID: &str = "main-tray";
+const SHOW_MENU_ID: &str = "show";
+const QUIT_MENU_ID: &str = "quit";
+
+fn main_window<R: Runtime>(app: &AppHandle<R>) -> Option<tauri::WebviewWindow<R>> {
+    app.get_webview_window(MAIN_WINDOW_LABEL)
+}
 
 fn focus_main_window<R: Runtime>(app: &AppHandle<R>) {
-    if let Some(window) = app.get_webview_window("main") {
+    if let Some(window) = main_window(app) {
         let _ = window.show();
         let _ = window.set_focus();
     }
@@ -20,15 +27,15 @@ fn ensure_tray_icon<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         return Ok(());
     }
 
-    let show = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+    let show = MenuItem::with_id(app, SHOW_MENU_ID, "Show", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, QUIT_MENU_ID, "Quit", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show, &quit])?;
 
     let mut builder = TrayIconBuilder::with_id(MAIN_TRAY_ID)
         .menu(&menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
-            "show" => focus_main_window(app),
-            "quit" => app.exit(0),
+            SHOW_MENU_ID => focus_main_window(app),
+            QUIT_MENU_ID => app.exit(0),
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
@@ -62,35 +69,21 @@ pub fn set_minimize_to_tray_on_close(
 ) -> Result<(), String> {
     if enabled {
         ensure_tray_icon(&app).map_err(|e| e.to_string())?;
-        state.enabled.store(true, Ordering::Relaxed);
     } else {
         remove_tray_icon(&app);
-        state.enabled.store(false, Ordering::Relaxed);
     }
 
-    Ok(())
-}
+    state.enabled.store(enabled, Ordering::Relaxed);
 
-#[tauri::command]
-pub fn greet(name: &str) -> String {
-    println!("Backend was called with an argument: {}", name);
-    format!("Hello, {}! You've been greeted from Rust!", name)
+    Ok(())
 }
 
 #[tauri::command]
 pub async fn show_emergency_window(app: tauri::AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("main") {
+    if let Some(window) = main_window(&app) {
         window.show().map_err(|e| e.to_string())?;
         window.set_focus().map_err(|e| e.to_string())?;
         window.set_always_on_top(true).map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn hide_emergency_window(app: tauri::AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("main") {
-        window.set_always_on_top(false).map_err(|e| e.to_string())?;
     }
     Ok(())
 }

@@ -1,6 +1,6 @@
 use std::sync::atomic::Ordering;
 
-use tauri::{Emitter, Manager};
+use tauri::Manager;
 
 mod api_client;
 mod auth_commands;
@@ -13,19 +13,15 @@ mod task_commands;
 mod window_controls;
 
 use constants::POPUP_LABEL;
-use ipc_types::DismissPayload;
 use state::{MinimizeToTrayState, PendingNotificationState};
 
 pub use auth_commands::{auth_login, auth_logout};
 pub use device_id::get_or_create_device_id;
 pub use popup_commands::{
-    emit_dismiss_notification, focus_alert_popup, get_pending_notification, hide_alert_popup,
-    show_alert_popup,
+    emit_dismiss_notification, get_pending_notification, hide_alert_popup, show_alert_popup,
 };
 pub use task_commands::{complete_task, fetch_tasks, reply_task};
-pub use window_controls::{
-    greet, hide_emergency_window, set_minimize_to_tray_on_close, show_emergency_window,
-};
+pub use window_controls::{set_minimize_to_tray_on_close, show_emergency_window};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -37,14 +33,6 @@ pub fn run() {
                 if window.label() == POPUP_LABEL {
                     api.prevent_close();
                     let _ = window.hide();
-
-                    if let Some(main_window) = window.app_handle().get_webview_window("main") {
-                        let payload = DismissPayload {
-                            notification_id: None,
-                            dismiss_all: false,
-                        };
-                        let _ = main_window.emit("popup-closed", payload);
-                    }
                     return;
                 }
 
@@ -66,7 +54,6 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_prevent_default::init())
         .invoke_handler(tauri::generate_handler![
-            greet,
             get_or_create_device_id,
             auth_login,
             auth_logout,
@@ -75,10 +62,8 @@ pub fn run() {
             complete_task,
             set_minimize_to_tray_on_close,
             show_emergency_window,
-            hide_emergency_window,
             show_alert_popup,
             hide_alert_popup,
-            focus_alert_popup,
             emit_dismiss_notification,
             get_pending_notification
         ])

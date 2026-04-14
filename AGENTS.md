@@ -16,9 +16,8 @@ Scope: Repository root (`/home/ahgahgjflshfa/projects/can-new-desktop`)
 - `src/stores/notificationStore.ts`: notification state and popup orchestration.
 - `src/services/notificationPoller.ts`: polling service boundary.
 - `src/services/mockServer.ts`: mock notification source.
-- `src/services/stream/playerCore.ts`: stream player core contract.
-- `src/services/stream/adapters/types.ts`: stream adapter contracts/events.
-- `src/services/stream/adapters/factory.ts`: adapter selection by source type.
+- `src/services/stream/playerCore.ts`: HLS player controller and playback state authority.
+- `src/components/stream/ManagedStreamPlayer.vue`: stream container that wires the player controller to the UI.
 - `src/PopupApp.vue`: popup UI behavior.
 - `src-tauri/src/lib.rs`: Tauri commands, windows/tray lifecycle.
 - `src-tauri/AGENTS.md`: backend-specific Rust guidance.

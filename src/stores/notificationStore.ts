@@ -292,8 +292,6 @@ export const useNotificationStore = defineStore('notifications', {
             this.dismissNotificationById(event.payload.notificationId)
           }
         })
-
-        _popupClosedUnlisten = await listen('popup-closed', () => {})
       } catch (err) {
         console.warn('Failed to setup dismiss listener:', err)
       }

@@ -62,16 +62,6 @@ pub async fn hide_alert_popup(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn focus_alert_popup(app: tauri::AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window(POPUP_LABEL) {
-        window.show().map_err(|e| e.to_string())?;
-        window.set_focus().map_err(|e| e.to_string())?;
-        window.set_always_on_top(true).map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
-
-#[tauri::command]
 pub async fn emit_dismiss_notification(
     app: tauri::AppHandle,
     notification_id: Option<String>,

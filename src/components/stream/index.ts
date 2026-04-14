@@ -1,5 +1,4 @@
 export { default as ManagedStreamPlayer } from './ManagedStreamPlayer.vue'
 export { default as StreamControls } from './StreamControls.vue'
-export { default as StreamErrorPanel } from './StreamErrorPanel.vue'
 export { default as StreamPlayer } from './StreamPlayer.vue'
 export { default as StreamStatusBadge } from './StreamStatusBadge.vue'
