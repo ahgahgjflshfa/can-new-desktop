@@ -14,6 +14,7 @@ export class HLSAdapter implements StreamAdapter {
   private startupStartedAt = 0
   private reconnectCount = 0
   private bufferCount = 0
+  private isPlaybackActive = false
 
   async connect(config: StreamAdapterConfig): Promise<void> {
     if (!config.sourceUrl) {
@@ -29,16 +30,39 @@ export class HLSAdapter implements StreamAdapter {
     this.detach()
     this.videoEl = videoEl
 
+    this.bindVideoListeners(videoEl)
+  }
+
+  private bindVideoListeners(videoEl: HTMLVideoElement): void {
+    if (this.removeVideoListeners) {
+      this.removeVideoListeners()
+      this.removeVideoListeners = null
+    }
+
     const onWaiting = () => {
+      this.isPlaybackActive = false
       this.bufferCount += 1
       this.emit({ type: 'buffering' })
       this.emitStats()
     }
 
-    const onPlaying = () => {
+    const markStarted = () => {
+      if (this.isPlaybackActive) {
+        return
+      }
+
+      this.isPlaybackActive = true
       this.state = 'streaming'
       this.emit({ type: 'started' })
       this.emitStats()
+    }
+
+    const onPlay = () => {
+      markStarted()
+    }
+
+    const onPlaying = () => {
+      markStarted()
     }
 
     const onError = () => {
@@ -46,11 +70,13 @@ export class HLSAdapter implements StreamAdapter {
     }
 
     videoEl.addEventListener('waiting', onWaiting)
+    videoEl.addEventListener('play', onPlay)
     videoEl.addEventListener('playing', onPlaying)
     videoEl.addEventListener('error', onError)
 
     this.removeVideoListeners = () => {
       videoEl.removeEventListener('waiting', onWaiting)
+      videoEl.removeEventListener('play', onPlay)
       videoEl.removeEventListener('playing', onPlaying)
       videoEl.removeEventListener('error', onError)
     }
@@ -62,9 +88,14 @@ export class HLSAdapter implements StreamAdapter {
     }
 
     this.startupStartedAt = Date.now()
+    this.isPlaybackActive = false
     this.emit({ type: 'buffering' })
 
     if (this.videoEl) {
+      if (!this.removeVideoListeners) {
+        this.bindVideoListeners(this.videoEl)
+      }
+
       await this.startPlayback(this.videoEl)
     }
   }
@@ -86,7 +117,13 @@ export class HLSAdapter implements StreamAdapter {
       this.videoEl.load()
     }
 
+    if (this.removeVideoListeners) {
+      this.removeVideoListeners()
+      this.removeVideoListeners = null
+    }
+
     this.state = 'stopped'
+    this.isPlaybackActive = false
     this.emit({ type: 'stopped' })
   }
 
@@ -136,20 +173,22 @@ export class HLSAdapter implements StreamAdapter {
           return
         }
 
-        const code = this.mapHlsError(data)
-        this.emit({ type: 'error', code, message: data?.details ?? 'HLS playback error' })
-
         if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
           this.reconnectCount += 1
+          this.emit({ type: 'buffering' })
           hls.startLoad()
           this.emitStats()
           return
         }
 
         if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+          this.emit({ type: 'buffering' })
           hls.recoverMediaError()
           return
         }
+
+        const code = this.mapHlsError(data)
+        this.emit({ type: 'error', code, message: data?.details ?? 'HLS playback error' })
 
         this.destroyHlsInstance()
       })
