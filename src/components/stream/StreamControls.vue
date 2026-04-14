@@ -1,18 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { StreamStatus } from '@/types/stream'
+import type { PlayerStatus } from '@/services/stream/playerCore'
 
 const props = withDefaults(
   defineProps<{
-    status: StreamStatus
-    isPlaying?: boolean
+    status: PlayerStatus
     muted?: boolean
-    disabled?: boolean
   }>(),
   {
-    isPlaying: false,
     muted: false,
-    disabled: false,
   }
 )
 
@@ -24,14 +20,11 @@ defineEmits<{
   toggleMute: []
 }>()
 
-const canPlay = computed(
-  () => !props.disabled && !props.isPlaying && ['idle', 'stopped', 'live'].includes(props.status)
-)
-const canPause = computed(() => !props.disabled && props.isPlaying)
-const canStop = computed(
-  () => !props.disabled && ['connecting', 'buffering', 'live', 'reconnecting'].includes(props.status)
-)
-const canRetry = computed(() => !props.disabled && ['error', 'stopped'].includes(props.status))
+const canPlay = computed(() => ['idle', 'paused', 'stopped', 'error'].includes(props.status))
+const canPause = computed(() => ['live', 'buffering'].includes(props.status))
+const canStop = computed(() => ['loading', 'live', 'buffering', 'paused', 'reconnecting'].includes(props.status))
+const canRetry = computed(() => props.status === 'error')
+const primaryAction = computed(() => (canPause.value ? 'pause' : 'play'))
 </script>
 
 <template>
@@ -39,31 +32,11 @@ const canRetry = computed(() => !props.disabled && ['error', 'stopped'].includes
     <button
       type="button"
       class="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
-      :disabled="!canPlay"
-      @click="$emit('play')"
+      :disabled="!(canPlay || canPause)"
+      @click="primaryAction === 'pause' ? $emit('pause') : $emit('play')"
     >
-      <span class="i-mdi-play text-base" />
-      Play
-    </button>
-
-    <button
-      type="button"
-      class="inline-flex items-center gap-2 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-2)] px-4 py-2 text-sm font-medium text-[var(--app-fg-strong)] transition-colors hover:bg-[var(--app-hover)] disabled:cursor-not-allowed disabled:opacity-50"
-      :disabled="!canPause"
-      @click="$emit('pause')"
-    >
-      <span class="i-mdi-pause text-base" />
-      Pause
-    </button>
-
-    <button
-      type="button"
-      class="inline-flex items-center gap-2 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-2)] px-4 py-2 text-sm font-medium text-[var(--app-fg-strong)] transition-colors hover:bg-[var(--app-hover)] disabled:cursor-not-allowed disabled:opacity-50"
-      :disabled="props.disabled"
-      @click="$emit('toggleMute')"
-    >
-      <span :class="props.muted ? 'i-mdi-volume-off' : 'i-mdi-volume-high'" class="text-base" />
-      {{ props.muted ? 'Unmute' : 'Mute' }}
+      <span :class="primaryAction === 'pause' ? 'i-mdi-pause' : 'i-mdi-play'" class="text-base" />
+      {{ primaryAction === 'pause' ? 'Pause' : 'Play' }}
     </button>
 
     <button
@@ -74,6 +47,15 @@ const canRetry = computed(() => !props.disabled && ['error', 'stopped'].includes
     >
       <span class="i-mdi-stop text-base" />
       Stop
+    </button>
+
+    <button
+      type="button"
+      class="inline-flex items-center gap-2 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-2)] px-4 py-2 text-sm font-medium text-[var(--app-fg-strong)] transition-colors hover:bg-[var(--app-hover)]"
+      @click="$emit('toggleMute')"
+    >
+      <span :class="props.muted ? 'i-mdi-volume-off' : 'i-mdi-volume-high'" class="text-base" />
+      {{ props.muted ? 'Unmute' : 'Mute' }}
     </button>
 
     <button

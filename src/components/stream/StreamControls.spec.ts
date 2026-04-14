@@ -3,16 +3,23 @@ import { describe, expect, test } from 'vitest'
 import StreamControls from './StreamControls.vue'
 
 describe('StreamControls', () => {
-  test('keeps play available when stream is live but currently paused', () => {
+  test('switches primary action to pause while live', () => {
     const wrapper = mount(StreamControls, {
       props: {
         status: 'live',
-        isPlaying: false,
       },
     })
 
-    const buttons = wrapper.findAll('button')
-    expect(buttons[0]?.attributes('disabled')).toBeUndefined()
-    expect(buttons[1]?.attributes('disabled')).toBeDefined()
+    expect(wrapper.findAll('button')[0]?.text()).toContain('Pause')
+  })
+
+  test('keeps play available when paused', () => {
+    const wrapper = mount(StreamControls, {
+      props: {
+        status: 'paused',
+      },
+    })
+
+    expect(wrapper.findAll('button')[0]?.text()).toContain('Play')
   })
 })
