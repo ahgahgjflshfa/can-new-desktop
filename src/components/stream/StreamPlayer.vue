@@ -1,29 +1,20 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import type { PlayerState } from '@/services/stream/playerCore'
 import StreamControls from './StreamControls.vue'
-import StreamErrorPanel from './StreamErrorPanel.vue'
 import StreamStatusBadge from './StreamStatusBadge.vue'
-import type { StreamError, StreamStats, StreamStatus } from '@/types/stream'
 
 const props = withDefaults(
   defineProps<{
     title?: string
     sourceLabel?: string
-    status: StreamStatus
-    error?: StreamError | null
-    stats?: StreamStats | null
-    isPlaying?: boolean
+    state: PlayerState
     muted?: boolean
-    disabled?: boolean
   }>(),
   {
     title: 'Camera Stream',
     sourceLabel: 'HLS Source',
-    error: null,
-    stats: null,
-    isPlaying: false,
     muted: false,
-    disabled: false,
   }
 )
 
@@ -38,69 +29,76 @@ const emit = defineEmits<{
 
 const videoEl = ref<HTMLVideoElement | null>(null)
 
-const overlayCopy = computed(() => {
-  switch (props.status) {
-    case 'connecting':
-      return {
-        icon: 'i-mdi-lan-connect',
-        title: 'Connecting to camera',
-        body: 'Preparing the HLS session and waiting for the first frames.',
-      }
-    case 'buffering':
-      return {
-        icon: 'i-mdi-loading animate-spin',
-        title: 'Buffering video',
-        body: 'The player is receiving segments and stabilizing playback.',
-      }
-    case 'reconnecting':
-      return {
-        icon: 'i-mdi-refresh animate-spin',
-        title: 'Reconnecting stream',
-        body: 'The connection dropped, attempting recovery now.',
-      }
-    case 'error':
-      return {
-        icon: 'i-mdi-alert-circle-outline',
-        title: 'Playback interrupted',
-        body: 'The stream needs attention before video can resume.',
-      }
-    case 'stopped':
-      return {
-        icon: 'i-mdi-stop-circle-outline',
-        title: 'Stream stopped',
-        body: 'Playback is paused and ready to restart when needed.',
-      }
-    case 'idle':
-      return {
-        icon: 'i-mdi-camcorder-off',
-        title: 'Ready for playback',
-        body: 'Attach a source and start the player to preview the camera feed.',
-      }
-    default:
-      return null
-  }
-})
+const shouldShowCompactBuffering = computed(() => props.state.status === 'buffering')
 
-const formattedStats = computed(() => {
-  if (!props.stats) {
-    return []
+const overlayModel = computed(() => {
+  if (props.state.status === 'error' && props.state.error) {
+    return {
+      kind: 'error' as const,
+      icon: 'i-mdi-alert-circle-outline',
+      title: 'Playback interrupted',
+      body: props.state.error.message,
+      actionLabel: props.state.error.retryable ? 'Retry Stream' : null,
+    }
   }
 
-  return [
-    { label: 'Startup', value: `${props.stats.startupTimeMs}ms` },
-    { label: 'Reconnects', value: `${props.stats.reconnectCount}` },
-    { label: 'Buffers', value: `${props.stats.bufferCount}` },
-  ]
+  if (props.state.status === 'reconnecting') {
+    return {
+      kind: 'loading' as const,
+      icon: 'i-mdi-refresh animate-spin',
+      title: 'Reconnecting stream',
+      body: 'The connection dropped. Attempting to restore playback.',
+      actionLabel: null,
+    }
+  }
+
+  if (props.state.status === 'loading') {
+    return {
+      kind: 'loading' as const,
+      icon: 'i-mdi-loading animate-spin',
+      title: 'Loading video',
+      body: 'Preparing the first frames for playback.',
+      actionLabel: null,
+    }
+  }
+
+  if (props.state.status === 'paused') {
+    return {
+      kind: 'action' as const,
+      icon: 'i-mdi-play-circle',
+      title: 'Paused',
+      body: 'Press play to continue from the current frame.',
+      actionLabel: 'Resume',
+    }
+  }
+
+  if (props.state.status === 'stopped') {
+    return {
+      kind: 'action' as const,
+      icon: 'i-mdi-replay',
+      title: 'Playback stopped',
+      body: 'Press play to start the stream again.',
+      actionLabel: 'Play Again',
+    }
+  }
+
+  if (props.state.status === 'idle') {
+    return {
+      kind: 'action' as const,
+      icon: 'i-mdi-play-circle-outline',
+      title: 'Ready to play',
+      body: 'Start playback when you want to preview the stream.',
+      actionLabel: 'Start Playback',
+    }
+  }
+
+  return null
 })
 
 onMounted(() => {
   if (videoEl.value) {
     emit('videoReady', videoEl.value)
   }
-})
-
-defineExpose({
-  videoEl,
 })
 </script>
 
@@ -114,7 +112,7 @@ defineExpose({
         <h2 class="mt-1 text-2xl font-bold text-[var(--app-fg-strong)]">{{ title }}</h2>
       </div>
 
-      <StreamStatusBadge :status="status" />
+      <StreamStatusBadge :status="state.status" />
     </header>
 
     <div class="relative overflow-hidden rounded-2xl border border-[var(--app-border)] bg-slate-950">
@@ -125,47 +123,55 @@ defineExpose({
       </div>
 
       <div
-        v-if="overlayCopy"
+        v-if="shouldShowCompactBuffering"
+        class="pointer-events-none absolute left-4 top-4 inline-flex items-center gap-2 rounded-full border border-white/12 bg-slate-950/78 px-3 py-1.5 text-xs font-semibold tracking-[0.12em] text-white shadow-lg shadow-black/25 backdrop-blur-md"
+      >
+        <span class="i-mdi-loading animate-spin text-sm text-sky-300" />
+        Buffering
+      </div>
+
+      <div
+        v-if="overlayModel"
         class="absolute inset-0 flex items-center justify-center bg-slate-950/64 backdrop-blur-[2px]"
       >
         <div
           class="mx-6 max-w-md rounded-2xl border border-white/10 bg-slate-900/78 px-6 py-5 text-center shadow-2xl shadow-black/30"
         >
-          <span :class="overlayCopy.icon" class="mx-auto mb-3 block text-3xl text-sky-300" />
-          <div class="text-lg font-semibold text-white">{{ overlayCopy.title }}</div>
-          <p class="mt-2 text-sm leading-relaxed text-slate-300">{{ overlayCopy.body }}</p>
+          <span :class="overlayModel.icon" class="mx-auto mb-3 block text-3xl text-sky-300" />
+          <div class="text-lg font-semibold text-white">{{ overlayModel.title }}</div>
+          <p class="mt-2 text-sm leading-relaxed text-slate-300">{{ overlayModel.body }}</p>
 
           <button
-            v-if="status === 'error'"
+            v-if="overlayModel.actionLabel"
             type="button"
             class="mt-4 inline-flex items-center gap-2 rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-sky-500"
-            @click="$emit('retry')"
+            @click="overlayModel.kind === 'error' ? $emit('retry') : $emit('play')"
           >
-            <span class="i-mdi-refresh" />
-            Retry Stream
+            <span :class="overlayModel.kind === 'error' ? 'i-mdi-refresh' : 'i-mdi-play'" />
+            {{ overlayModel.actionLabel }}
           </button>
         </div>
       </div>
     </div>
 
-    <div v-if="formattedStats.length > 0" class="grid gap-3 sm:grid-cols-3">
-      <div
-        v-for="item in formattedStats"
-        :key="item.label"
-        class="rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-4 py-3"
-      >
-        <div class="text-xs uppercase tracking-[0.18em] text-[var(--app-muted)]">{{ item.label }}</div>
-        <div class="mt-1 text-lg font-semibold text-[var(--app-fg-strong)]">{{ item.value }}</div>
+    <div v-if="state.stats" class="grid gap-3 sm:grid-cols-3">
+      <div class="rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-4 py-3">
+        <div class="text-xs uppercase tracking-[0.18em] text-[var(--app-muted)]">Startup</div>
+        <div class="mt-1 text-lg font-semibold text-[var(--app-fg-strong)]">{{ state.stats.startupTimeMs }}ms</div>
+      </div>
+      <div class="rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-4 py-3">
+        <div class="text-xs uppercase tracking-[0.18em] text-[var(--app-muted)]">Reconnects</div>
+        <div class="mt-1 text-lg font-semibold text-[var(--app-fg-strong)]">{{ state.stats.reconnectCount }}</div>
+      </div>
+      <div class="rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-4 py-3">
+        <div class="text-xs uppercase tracking-[0.18em] text-[var(--app-muted)]">Buffers</div>
+        <div class="mt-1 text-lg font-semibold text-[var(--app-fg-strong)]">{{ state.stats.bufferCount }}</div>
       </div>
     </div>
 
-    <StreamErrorPanel :error="error" @retry="$emit('retry')" />
-
     <StreamControls
-      :status="status"
-      :is-playing="isPlaying"
+      :status="state.status"
       :muted="muted"
-      :disabled="disabled"
       @play="$emit('play')"
       @pause="$emit('pause')"
       @stop="$emit('stop')"

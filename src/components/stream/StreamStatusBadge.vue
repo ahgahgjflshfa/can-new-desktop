@@ -1,13 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { StreamStatus } from '@/types/stream'
+import type { PlayerStatus } from '@/services/stream/playerCore'
 
-const props = withDefaults(
-  defineProps<{
-    status: StreamStatus
-  }>(),
-  {}
-)
+const props = defineProps<{
+  status: PlayerStatus
+}>()
 
 const statusConfig = computed(() => {
   switch (props.status) {
@@ -23,9 +20,9 @@ const statusConfig = computed(() => {
         dotClass: 'bg-amber-400 shadow-[0_0_12px_rgba(251,191,36,0.65)]',
         badgeClass: 'border-amber-500/40 bg-amber-500/10 text-amber-300',
       }
-    case 'connecting':
+    case 'loading':
       return {
-        label: 'Connecting',
+        label: 'Loading',
         dotClass: 'bg-sky-400 shadow-[0_0_12px_rgba(56,189,248,0.7)]',
         badgeClass: 'border-sky-500/40 bg-sky-500/10 text-sky-300',
       }
@@ -34,6 +31,12 @@ const statusConfig = computed(() => {
         label: 'Reconnecting',
         dotClass: 'bg-orange-400 shadow-[0_0_12px_rgba(251,146,60,0.7)]',
         badgeClass: 'border-orange-500/40 bg-orange-500/10 text-orange-300',
+      }
+    case 'paused':
+      return {
+        label: 'Paused',
+        dotClass: 'bg-violet-400 shadow-[0_0_12px_rgba(167,139,250,0.65)]',
+        badgeClass: 'border-violet-500/40 bg-violet-500/10 text-violet-300',
       }
     case 'error':
       return {
