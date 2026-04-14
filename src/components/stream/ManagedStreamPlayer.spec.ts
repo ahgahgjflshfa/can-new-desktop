@@ -3,57 +3,43 @@ import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import ManagedStreamPlayer from './ManagedStreamPlayer.vue'
 
-const mockStreamStore = {
+const controllerState = {
   status: 'idle',
-  stats: null,
-  lastError: null,
-  isPlaying: false,
-  muted: false,
-  isPending: false,
-  init: vi.fn(),
-  loadStream: vi.fn().mockResolvedValue(undefined),
-  attachVideoElement: vi.fn(),
+  error: null,
+  stats: { startupTimeMs: 0, reconnectCount: 0, bufferCount: 0 },
+  hasLoadedSource: false,
+}
+
+const mockController = {
+  attach: vi.fn(),
+  load: vi.fn().mockResolvedValue(undefined),
   play: vi.fn().mockResolvedValue(undefined),
   pause: vi.fn(),
   stop: vi.fn().mockResolvedValue(undefined),
   retry: vi.fn().mockResolvedValue(undefined),
-  toggleMute: vi.fn(),
   dispose: vi.fn().mockResolvedValue(undefined),
+  setMuted: vi.fn(),
+  getState: vi.fn(() => controllerState),
+  onStateChange: vi.fn(() => vi.fn()),
 }
 
-vi.mock('@/stores/streamStore', () => ({
-  useStreamStore: vi.fn(() => mockStreamStore),
+vi.mock('@/services/stream/playerCore', () => ({
+  createPlayerController: vi.fn(() => mockController),
 }))
 
 describe('ManagedStreamPlayer', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
-  })
-
-  test('initializes the store and loads the provided stream config', async () => {
-    mount(ManagedStreamPlayer, {
-      props: {
-        streamConfig: {
-          sourceType: 'hls',
-          sourceUrl: 'https://example.com/live.m3u8',
-        },
-      },
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn(() => null),
+      setItem: vi.fn(),
+      removeItem: vi.fn(),
+      clear: vi.fn(),
     })
-
-    await flushPromises()
-
-    expect(mockStreamStore.init).toHaveBeenCalledTimes(1)
-    expect(mockStreamStore.loadStream).toHaveBeenCalledWith(
-      {
-        sourceType: 'hls',
-        sourceUrl: 'https://example.com/live.m3u8',
-      },
-      false
-    )
   })
 
-  test('wires player interactions into the stream store', async () => {
+  test('initializes and loads the provided stream config when video becomes ready', async () => {
     const wrapper = mount(ManagedStreamPlayer, {
       props: {
         streamConfig: {
@@ -63,7 +49,28 @@ describe('ManagedStreamPlayer', () => {
       },
     })
 
+    await wrapper.findComponent({ name: 'StreamPlayer' }).vm.$emit('videoReady', document.createElement('video'))
     await flushPromises()
+
+    expect(mockController.attach).toHaveBeenCalled()
+    expect(mockController.load).toHaveBeenLastCalledWith(
+      {
+        sourceType: 'hls',
+        sourceUrl: 'https://example.com/live.m3u8',
+      },
+      { autoplay: false }
+    )
+  })
+
+  test('wires player interactions into the controller', async () => {
+    const wrapper = mount(ManagedStreamPlayer, {
+      props: {
+        streamConfig: {
+          sourceType: 'hls',
+          sourceUrl: 'https://example.com/live.m3u8',
+        },
+      },
+    })
 
     await wrapper.findComponent({ name: 'StreamPlayer' }).vm.$emit('play')
     await wrapper.findComponent({ name: 'StreamPlayer' }).vm.$emit('retry')
@@ -71,10 +78,10 @@ describe('ManagedStreamPlayer', () => {
     await wrapper.findComponent({ name: 'StreamPlayer' }).vm.$emit('pause')
     await wrapper.findComponent({ name: 'StreamPlayer' }).vm.$emit('stop')
 
-    expect(mockStreamStore.play).toHaveBeenCalledTimes(1)
-    expect(mockStreamStore.retry).toHaveBeenCalledTimes(1)
-    expect(mockStreamStore.toggleMute).toHaveBeenCalledTimes(1)
-    expect(mockStreamStore.pause).toHaveBeenCalledTimes(1)
-    expect(mockStreamStore.stop).toHaveBeenCalledTimes(1)
+    expect(mockController.play).toHaveBeenCalledTimes(1)
+    expect(mockController.retry).toHaveBeenCalledTimes(1)
+    expect(mockController.setMuted).toHaveBeenCalled()
+    expect(mockController.pause).toHaveBeenCalledTimes(1)
+    expect(mockController.stop).toHaveBeenCalledTimes(1)
   })
 })

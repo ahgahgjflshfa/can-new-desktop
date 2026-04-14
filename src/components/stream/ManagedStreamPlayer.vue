@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted } from 'vue'
 import StreamPlayer from './StreamPlayer.vue'
+import { createPlayerController } from '@/services/stream/playerCore'
 import { useStreamStore } from '@/stores/streamStore'
 import type { StreamConfig } from '@/types/stream'
 
@@ -21,54 +22,61 @@ const props = withDefaults(
 )
 
 const streamStore = useStreamStore()
-
-const status = computed(() => streamStore.status)
-const stats = computed(() => streamStore.stats)
-const error = computed(() => streamStore.lastError)
-const isPlaying = computed(() => streamStore.isPlaying)
+const controller = createPlayerController()
+const playerState = computed(() => streamStore.playerState)
 const muted = computed(() => streamStore.muted)
-const disabled = computed(() => streamStore.isPending)
+
+let unsubscribeController: (() => void) | null = null
 
 async function loadInitialStream() {
-  try {
-    await streamStore.loadStream(props.streamConfig, props.autoplay)
-  } catch (err) {
-    console.warn('failed to load stream', err)
-  }
+  streamStore.setCurrentConfig(props.streamConfig)
+  await controller.load(props.streamConfig, { autoplay: props.autoplay })
+}
+
+async function handleVideoReady(videoElement: HTMLVideoElement) {
+  controller.attach(videoElement)
+  controller.setMuted(streamStore.muted)
+  await loadInitialStream()
 }
 
 async function handlePlay() {
-  try {
-    await streamStore.play()
-  } catch (err) {
-    console.warn('failed to start playback', err)
-  }
+  await controller.play()
+}
+
+function handlePause() {
+  controller.pause()
 }
 
 async function handleStop() {
-  try {
-    await streamStore.stop()
-  } catch (err) {
-    console.warn('failed to stop playback', err)
-  }
+  await controller.stop()
 }
 
 async function handleRetry() {
-  try {
-    await streamStore.retry()
-  } catch (err) {
-    console.warn('failed to retry playback', err)
-  }
+  await controller.retry()
 }
 
-onMounted(async () => {
+function handleToggleMute() {
+  const nextMuted = !streamStore.muted
+  streamStore.setMuted(nextMuted)
+  controller.setMuted(nextMuted)
+}
+
+onMounted(() => {
   streamStore.init()
-  await loadInitialStream()
+  unsubscribeController = controller.onStateChange(state => {
+    streamStore.setPlayerState(state)
+  })
+  controller.setMuted(streamStore.muted)
+  streamStore.setPlayerState(controller.getState())
 })
 
-onUnmounted(() => {
+onUnmounted(async () => {
+  unsubscribeController?.()
+  unsubscribeController = null
+  streamStore.resetPlayerState()
+
   if (props.disposeOnUnmount) {
-    void streamStore.dispose()
+    await controller.dispose()
   }
 })
 </script>
@@ -77,17 +85,13 @@ onUnmounted(() => {
   <StreamPlayer
     :title="title"
     :source-label="sourceLabel"
-    :status="status"
-    :stats="stats"
-    :error="error"
-    :is-playing="isPlaying"
+    :state="playerState"
     :muted="muted"
-    :disabled="disabled"
-    @video-ready="streamStore.attachVideoElement"
+    @video-ready="handleVideoReady"
     @play="handlePlay"
-    @pause="streamStore.pause"
+    @pause="handlePause"
     @stop="handleStop"
     @retry="handleRetry"
-    @toggle-mute="streamStore.toggleMute"
+    @toggle-mute="handleToggleMute"
   />
 </template>
