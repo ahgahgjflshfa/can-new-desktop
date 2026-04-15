@@ -37,19 +37,17 @@ async function submitLogin() {
   >
     <div class="mx-auto grid min-h-[calc(100vh-3rem)] w-full max-w-3xl place-items-center sm:min-h-[calc(100vh-4rem)]">
       <div
-        class="flex min-h-[458px] w-full max-w-[390px] flex-col rounded-[1.5rem] border border-[#cac4d0] bg-[#fffbfe] px-5 py-6 shadow-[0_18px_36px_rgba(29,27,32,0.08)] sm:px-7 sm:py-7"
+        class="flex min-h-[440px] w-full max-w-[376px] flex-col rounded-[1.4rem] border border-[#cac4d0] bg-[#fffbfe] px-5 py-5 shadow-[0_16px_32px_rgba(29,27,32,0.08)] sm:px-6 sm:py-6"
       >
-        <div class="mb-6 text-center sm:mb-7">
+        <div class="mb-5 text-center sm:mb-6">
           <div
-            class="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-[#e8def8] text-[#6750a4] shadow-[0_8px_18px_rgba(103,80,164,0.14)]"
+            class="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-[#e8def8] text-[#6750a4] shadow-[0_7px_16px_rgba(103,80,164,0.14)]"
           >
-            <span class="i-mdi-headset text-[1.45rem]" />
+            <span class="i-mdi-headset text-[1.3rem]" />
           </div>
 
-          <h1 class="text-[1.65rem] font-black tracking-tight text-[#1d1b20] sm:text-[1.95rem]">車站服務系統後台</h1>
-          <p class="mt-1.5 text-[0.95rem] font-semibold text-[#625b71] sm:text-[1.15rem]">
-            Station Service System Login
-          </p>
+          <h1 class="text-[1.55rem] font-black tracking-tight text-[#1d1b20] sm:text-[1.8rem]">車站服務系統後台</h1>
+          <p class="mt-1 text-[0.88rem] font-semibold text-[#625b71] sm:text-[1.02rem]">Station Service System Login</p>
         </div>
 
         <form class="flex flex-1 flex-col gap-3.5" @submit.prevent="submitLogin">

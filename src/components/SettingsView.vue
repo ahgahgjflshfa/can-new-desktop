@@ -55,7 +55,9 @@ function handleIntervalChange(event: Event) {
       <!-- Section: Notifications -->
       <div class="rounded-[1.5rem] border border-[var(--app-border)] bg-[var(--app-surface)] p-6">
         <h2 class="text-xl font-semibold mb-4 text-[var(--app-fg)] flex items-center gap-2">
-          <div class="i-mdi-bell-ring text-[var(--app-primary-strong)]" />
+          <span
+            class="i-mdi-bell-ring inline-flex shrink-0 text-[1.2rem] leading-none font-normal text-[var(--app-primary-strong)]"
+          />
           Notifications
         </h2>
 
@@ -112,7 +114,9 @@ function handleIntervalChange(event: Event) {
       <!-- Section: Window Behavior -->
       <div class="rounded-[1.5rem] border border-[var(--app-border)] bg-[var(--app-surface)] p-6">
         <h2 class="text-xl font-semibold mb-4 text-[var(--app-fg)] flex items-center gap-2">
-          <div class="i-mdi-window-maximize text-[var(--app-primary-strong)]" />
+          <span
+            class="i-mdi-window-maximize inline-flex shrink-0 text-[1.2rem] leading-none font-normal text-[var(--app-primary-strong)]"
+          />
           Window Behavior
         </h2>
 
@@ -138,7 +142,9 @@ function handleIntervalChange(event: Event) {
       <!-- Section: Appearance -->
       <div class="rounded-[1.5rem] border border-[var(--app-border)] bg-[var(--app-surface)] p-6">
         <h2 class="text-xl font-semibold mb-4 text-[var(--app-fg)] flex items-center gap-2">
-          <div class="i-mdi-palette text-[var(--app-primary-strong)]" />
+          <span
+            class="i-mdi-palette inline-flex shrink-0 text-[1.2rem] leading-none font-normal text-[var(--app-primary-strong)]"
+          />
           Appearance
         </h2>
 
