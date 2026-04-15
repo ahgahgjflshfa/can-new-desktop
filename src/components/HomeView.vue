@@ -19,8 +19,8 @@ onUnmounted(() => {
 })
 
 const connectionStatusClass = computed(() => {
-  if (!notificationStore.isPolling) return 'bg-gray-500'
-  return notificationStore.pollingStats.isConnected ? 'bg-green-500' : 'bg-red-500'
+  if (!notificationStore.isPolling) return 'bg-[var(--app-muted-2)]'
+  return notificationStore.pollingStats.isConnected ? 'bg-[var(--app-success)]' : 'bg-[var(--app-danger)]'
 })
 
 const connectionStatusText = computed(() => {
@@ -56,9 +56,14 @@ function goToAlerts() {
 </script>
 
 <template>
-  <div class="p-6 space-y-6">
+  <div class="space-y-6 px-6 py-6 md:px-8 md:py-8">
     <div class="flex items-center justify-between">
-      <h1 class="text-2xl font-bold text-[var(--app-fg-strong)]">Dashboard</h1>
+      <div>
+        <h1 class="text-2xl font-bold text-[var(--app-fg-strong)]">Dashboard</h1>
+        <p class="mt-1 text-sm text-[var(--app-muted)]">
+          Monitor alert activity, connection health, and recent station events.
+        </p>
+      </div>
       <div class="flex items-center gap-4 text-sm text-[var(--app-muted)]">
         <span>Last poll: {{ lastPollDisplay }}</span>
         <div class="flex items-center gap-1.5">
@@ -69,13 +74,13 @@ function goToAlerts() {
     </div>
 
     <div
-      class="rounded-xl p-6 border-2 cursor-pointer transition-all hover:scale-[1.01]"
+      class="cursor-pointer rounded-[1.5rem] border p-6 transition-all hover:-translate-y-0.5"
       :class="
         notificationStore.pendingAlertCount > 0
-          ? 'bg-red-500/20 border-red-500'
+          ? 'bg-[color:rgba(196,91,91,0.12)] border-[var(--app-danger)]'
           : notificationStore.unreadCount > 0
-            ? 'bg-orange-500/10 border-orange-500/50'
-            : 'bg-[var(--app-surface-2)] border-[var(--app-border)]'
+            ? 'bg-[color:rgba(212,139,42,0.10)] border-[color:rgba(212,139,42,0.55)]'
+            : 'bg-[var(--app-surface)] border-[var(--app-border)]'
       "
       @click="goToAlerts"
     >
@@ -85,11 +90,11 @@ function goToAlerts() {
           <div class="flex items-baseline gap-3">
             <span
               class="text-5xl font-bold"
-              :class="notificationStore.unreadCount > 0 ? 'text-red-400' : 'text-[var(--app-fg-strong)]'"
+              :class="notificationStore.unreadCount > 0 ? 'text-[var(--app-danger)]' : 'text-[var(--app-fg-strong)]'"
             >
               {{ notificationStore.unreadCount }}
             </span>
-            <span v-if="notificationStore.pendingAlertCount > 0" class="text-red-400 font-medium">
+            <span v-if="notificationStore.pendingAlertCount > 0" class="font-medium text-[var(--app-danger)]">
               ({{ notificationStore.pendingAlertCount }} pending)
             </span>
           </div>
@@ -107,10 +112,14 @@ function goToAlerts() {
       </div>
     </div>
 
-    <div class="rounded-xl bg-[var(--app-surface-2)] border border-[var(--app-border)] overflow-hidden">
+    <div class="overflow-hidden rounded-[1.5rem] border border-[var(--app-border)] bg-[var(--app-surface)]">
       <div class="flex items-center justify-between px-4 py-3 border-b border-[var(--app-border)]">
         <h2 class="font-semibold text-[var(--app-fg-strong)]">Recent Activity</h2>
-        <button type="button" class="text-sm text-sky-400 hover:text-sky-300 transition-colors" @click="goToAlerts">
+        <button
+          type="button"
+          class="text-sm text-[var(--app-primary-strong)] transition-colors hover:text-[var(--app-primary)]"
+          @click="goToAlerts"
+        >
           View All
         </button>
       </div>
@@ -130,10 +139,10 @@ function goToAlerts() {
           <span
             class="w-2 h-2 rounded-full shrink-0"
             :class="{
-              'bg-red-500': notification.priority === 'pending',
-              'bg-orange-500': notification.priority === 'replied',
-              'bg-green-500': notification.priority === 'completed',
-              'bg-slate-500': notification.priority === 'ignored',
+              'bg-[var(--app-danger)]': notification.priority === 'pending',
+              'bg-[var(--app-warning)]': notification.priority === 'replied',
+              'bg-[var(--app-success)]': notification.priority === 'completed',
+              'bg-[var(--app-muted-2)]': notification.priority === 'ignored',
             }"
           />
           <div class="flex-1 min-w-0">
@@ -141,18 +150,24 @@ function goToAlerts() {
             <div class="text-sm text-[var(--app-muted)] truncate">{{ notification.body }}</div>
           </div>
           <div class="text-xs text-[var(--app-muted)] shrink-0">{{ formatTime(notification.receivedAt) }}</div>
-          <span v-if="notification.status === 'dismissed'" class="i-mdi-check-circle text-green-500 shrink-0" />
+          <span
+            v-if="notification.status === 'dismissed'"
+            class="i-mdi-check-circle shrink-0 text-[var(--app-success)]"
+          />
           <span v-else class="i-mdi-circle-outline text-[var(--app-muted)] shrink-0" />
         </div>
       </div>
     </div>
 
-    <div v-if="notificationStore.pollingStats.lastError" class="rounded-xl bg-red-500/10 border border-red-500/50 p-4">
+    <div
+      v-if="notificationStore.pollingStats.lastError"
+      class="rounded-[1.25rem] border border-[color:rgba(196,91,91,0.35)] bg-[color:rgba(196,91,91,0.08)] p-4"
+    >
       <div class="flex items-start gap-3">
-        <span class="i-mdi-alert-circle text-red-500 text-xl shrink-0" />
+        <span class="i-mdi-alert-circle text-xl shrink-0 text-[var(--app-danger)]" />
         <div>
-          <div class="font-medium text-red-400">Connection Error</div>
-          <div class="text-sm text-red-300/80">{{ notificationStore.pollingStats.lastError }}</div>
+          <div class="font-medium text-[var(--app-danger)]">Connection Error</div>
+          <div class="text-sm text-[color:rgba(87,52,52,0.82)]">{{ notificationStore.pollingStats.lastError }}</div>
         </div>
       </div>
     </div>

@@ -26,7 +26,7 @@ function applyStreamUrl() {
 </script>
 
 <template>
-  <div class="min-h-full px-6 py-8">
+  <div class="min-h-full px-6 py-6 md:px-8 md:py-8">
     <div class="mx-auto flex min-h-full max-w-6xl flex-col justify-center gap-6">
       <div class="space-y-2 text-center">
         <p class="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--app-muted)]">Internal Test Surface</p>
@@ -38,7 +38,7 @@ function applyStreamUrl() {
       </div>
 
       <section
-        class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-5 shadow-[0_18px_40px_rgba(0,0,0,0.18)]"
+        class="rounded-[1.5rem] border border-[var(--app-border)] bg-[var(--app-surface)] p-5 shadow-[0_18px_40px_rgba(29,27,32,0.08)]"
       >
         <div class="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-end">
           <label class="block">
@@ -48,7 +48,7 @@ function applyStreamUrl() {
             <input
               v-model="streamUrlInput"
               type="url"
-              class="w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-2)] px-4 py-3 text-sm text-[var(--app-fg-strong)] outline-none transition-colors placeholder:text-[var(--app-muted-2)] focus:border-sky-500/60"
+              class="w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-2)] px-4 py-3 text-sm text-[var(--app-fg-strong)] outline-none transition-colors placeholder:text-[var(--app-muted-2)] focus:border-[var(--app-primary)]"
               placeholder="https://example.com/live.m3u8"
               spellcheck="false"
             />
@@ -56,7 +56,7 @@ function applyStreamUrl() {
 
           <button
             type="button"
-            class="inline-flex items-center justify-center gap-2 rounded-xl bg-sky-600 px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
+            class="inline-flex items-center justify-center gap-2 rounded-xl bg-[var(--app-primary-strong)] px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-[var(--app-primary)] disabled:cursor-not-allowed disabled:opacity-50"
             :disabled="!canLoad"
             @click="applyStreamUrl"
           >

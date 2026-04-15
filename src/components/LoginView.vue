@@ -37,7 +37,7 @@ async function submitLogin() {
   >
     <div class="mx-auto grid min-h-[calc(100vh-3rem)] w-full max-w-3xl place-items-center sm:min-h-[calc(100vh-4rem)]">
       <div
-        class="w-full max-w-[390px] rounded-[1.5rem] border border-[#cac4d0] bg-[#fffbfe] px-5 py-6 shadow-[0_18px_36px_rgba(29,27,32,0.08)] sm:px-7 sm:py-7"
+        class="flex min-h-[458px] w-full max-w-[390px] flex-col rounded-[1.5rem] border border-[#cac4d0] bg-[#fffbfe] px-5 py-6 shadow-[0_18px_36px_rgba(29,27,32,0.08)] sm:px-7 sm:py-7"
       >
         <div class="mb-6 text-center sm:mb-7">
           <div
@@ -52,7 +52,7 @@ async function submitLogin() {
           </p>
         </div>
 
-        <form class="space-y-3.5" @submit.prevent="submitLogin">
+        <form class="flex flex-1 flex-col gap-3.5" @submit.prevent="submitLogin">
           <label class="block">
             <span class="mb-1.5 block text-xs font-semibold tracking-wide text-[#625b71]">帳號 (Account)</span>
             <input
@@ -97,7 +97,7 @@ async function submitLogin() {
 
           <button
             :disabled="!canSubmit"
-            class="mt-1 h-12 w-full rounded-full bg-[#6750a4] px-4 text-lg font-bold tracking-[0.16em] text-white shadow-[0_14px_26px_rgba(103,80,164,0.22)] transition-all hover:bg-[#5d4698] disabled:cursor-not-allowed disabled:bg-[#d0c7dd] disabled:text-[#7b7585] disabled:shadow-none"
+            class="mt-auto h-12 w-full rounded-full bg-[#6750a4] px-4 text-lg font-bold tracking-[0.16em] text-white shadow-[0_14px_26px_rgba(103,80,164,0.22)] transition-all hover:bg-[#5d4698] disabled:cursor-not-allowed disabled:bg-[#d0c7dd] disabled:text-[#7b7585] disabled:shadow-none"
             type="submit"
           >
             {{ authStore.isSubmitting ? '登入中' : '登入' }}

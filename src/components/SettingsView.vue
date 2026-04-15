@@ -45,14 +45,17 @@ function handleIntervalChange(event: Event) {
 </script>
 
 <template>
-  <div class="max-w-2xl mx-auto py-12 px-6">
-    <h1 class="text-3xl font-bold mb-8 text-[var(--app-fg-strong)] tracking-tight">Settings</h1>
+  <div class="mx-auto max-w-4xl px-6 py-6 md:px-8 md:py-8">
+    <div class="mb-8">
+      <h1 class="text-3xl font-bold tracking-tight text-[var(--app-fg-strong)]">Settings</h1>
+      <p class="mt-1 text-sm text-[var(--app-muted)]">Control notifications, window behavior, and the app theme.</p>
+    </div>
 
     <div class="space-y-6">
       <!-- Section: Notifications -->
-      <div class="bg-[var(--app-surface-2)] rounded-xl p-6 border border-[var(--app-border)]">
+      <div class="rounded-[1.5rem] border border-[var(--app-border)] bg-[var(--app-surface)] p-6">
         <h2 class="text-xl font-semibold mb-4 text-[var(--app-fg)] flex items-center gap-2">
-          <div class="i-mdi-bell-ring text-sky-500" />
+          <div class="i-mdi-bell-ring text-[var(--app-primary-strong)]" />
           Notifications
         </h2>
 
@@ -66,7 +69,7 @@ function handleIntervalChange(event: Event) {
             <label class="relative inline-flex items-center cursor-pointer">
               <input id="polling-toggle" type="checkbox" v-model="pollingEnabled" class="sr-only peer" />
               <div
-                class="w-11 h-6 bg-[var(--app-control-bg)] peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-sky-500 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-[var(--app-control-knob)] after:border-[var(--app-border)] after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-sky-600"
+                class="w-11 h-6 bg-[var(--app-control-bg)] peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[var(--app-primary)] rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-[var(--app-control-knob)] after:border-[var(--app-border)] after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[var(--app-primary-strong)]"
               ></div>
             </label>
           </div>
@@ -80,7 +83,7 @@ function handleIntervalChange(event: Event) {
             <select
               :value="pollingInterval"
               :disabled="!pollingEnabled"
-              class="px-3 py-2 rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] text-[var(--app-fg)] text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 disabled:opacity-50 disabled:cursor-not-allowed"
+              class="px-3 py-2 rounded-lg bg-[var(--app-surface-2)] border border-[var(--app-border)] text-[var(--app-fg)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--app-primary)] disabled:opacity-50 disabled:cursor-not-allowed"
               @change="handleIntervalChange"
             >
               <option v-for="option in intervalOptions" :key="option.value" :value="option.value">
@@ -90,13 +93,16 @@ function handleIntervalChange(event: Event) {
           </div>
 
           <div v-if="notificationStore.isPolling" class="flex items-center gap-2 text-sm text-[var(--app-muted)] pt-2">
-            <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+            <span class="w-2 h-2 rounded-full bg-[var(--app-success)] animate-pulse" />
             <span>Polling active</span>
             <span class="text-[var(--app-muted-2)]">•</span>
             <span>{{ notificationStore.pollingStats.pollCount }} polls completed</span>
           </div>
 
-          <div v-if="notificationStore.lastError" class="p-3 rounded-lg bg-red-500/10 text-red-400 text-sm">
+          <div
+            v-if="notificationStore.lastError"
+            class="rounded-lg border border-[color:rgba(196,91,91,0.35)] bg-[color:rgba(196,91,91,0.08)] p-3 text-sm text-[var(--app-danger)]"
+          >
             <span class="i-mdi-alert-circle mr-2" />
             {{ notificationStore.lastError }}
           </div>
@@ -104,9 +110,9 @@ function handleIntervalChange(event: Event) {
       </div>
 
       <!-- Section: Window Behavior -->
-      <div class="bg-[var(--app-surface-2)] rounded-xl p-6 border border-[var(--app-border)]">
+      <div class="rounded-[1.5rem] border border-[var(--app-border)] bg-[var(--app-surface)] p-6">
         <h2 class="text-xl font-semibold mb-4 text-[var(--app-fg)] flex items-center gap-2">
-          <div class="i-mdi-window-maximize text-sky-500" />
+          <div class="i-mdi-window-maximize text-[var(--app-primary-strong)]" />
           Window Behavior
         </h2>
 
@@ -123,16 +129,16 @@ function handleIntervalChange(event: Event) {
           <label class="relative inline-flex items-center cursor-pointer">
             <input id="minimize-toggle" type="checkbox" v-model="minimizeOnClose" class="sr-only peer" />
             <div
-              class="w-11 h-6 bg-[var(--app-control-bg)] peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-sky-500 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-[var(--app-control-knob)] after:border-[var(--app-border)] after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-sky-600"
+              class="w-11 h-6 bg-[var(--app-control-bg)] peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[var(--app-primary)] rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-[var(--app-control-knob)] after:border-[var(--app-border)] after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[var(--app-primary-strong)]"
             ></div>
           </label>
         </div>
       </div>
 
       <!-- Section: Appearance -->
-      <div class="bg-[var(--app-surface-2)] rounded-xl p-6 border border-[var(--app-border)]">
+      <div class="rounded-[1.5rem] border border-[var(--app-border)] bg-[var(--app-surface)] p-6">
         <h2 class="text-xl font-semibold mb-4 text-[var(--app-fg)] flex items-center gap-2">
-          <div class="i-mdi-palette text-sky-500" />
+          <div class="i-mdi-palette text-[var(--app-primary-strong)]" />
           Appearance
         </h2>
 
@@ -144,7 +150,7 @@ function handleIntervalChange(event: Event) {
             >
           </div>
 
-          <div class="shrink-0 inline-flex rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] p-1">
+          <div class="shrink-0 inline-flex rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-2)] p-1">
             <button
               type="button"
               class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
