@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useStore } from '@/store'
 import { useAuthStore } from '@/stores/authStore'
 
@@ -9,11 +10,16 @@ const SIDEBAR_COLLAPSED_STORAGE_KEY = 'tauri-app:sidebarCollapsed'
 const isSidebarCollapsed = ref(false)
 
 const navItems = [
-  { id: 'home', label: 'Home', icon: 'i-mdi-home' },
-  { id: 'notifications', label: 'Alerts', icon: 'i-mdi-bell-ring' },
-  { id: 'stream-test', label: 'Stream Test', icon: 'i-mdi-play-box-multiple' },
-  { id: 'settings', label: 'Settings', icon: 'i-mdi-cog' },
+  { id: 'notifications', label: 'Alerts', shortLabel: 'Alerts', icon: 'i-mdi-bell-ring-outline' },
+  { id: 'stream-test', label: 'Stream Test', shortLabel: 'Streams', icon: 'i-mdi-play-box-multiple-outline' },
+  { id: 'settings', label: 'Settings', shortLabel: 'Settings', icon: 'i-mdi-cog-outline' },
 ] as const
+
+const currentNavItem = computed(() => navItems.find(item => item.id === store.currentView) ?? navItems[0])
+
+const userInitial = computed(() => authStore.user?.name?.trim().charAt(0).toUpperCase() ?? 'A')
+
+const userMeta = computed(() => authStore.user?.stationId ?? authStore.user?.role ?? 'Station Service')
 
 onMounted(() => {
   if (typeof localStorage === 'undefined') return
@@ -36,116 +42,130 @@ async function handleLogout() {
 </script>
 
 <template>
-  <div class="flex h-screen w-screen bg-[var(--app-bg)] text-[var(--app-fg)] overflow-hidden font-sans antialiased">
-    <!-- Desktop Sidebar -->
-    <aside
-      class="hidden md:flex flex-col bg-[var(--app-surface)] border-r border-[var(--app-border)] transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative"
-      :class="[isSidebarCollapsed ? 'w-20' : 'w-64']"
-    >
-      <button
-        type="button"
-        class="group absolute top-1/2 -right-4 z-20 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full border border-[var(--app-border)] bg-[var(--app-surface)] text-[var(--app-muted)] shadow-md shadow-black/40 transition-all duration-200 hover:bg-[var(--app-hover)] hover:text-[var(--app-fg)] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
-        :aria-label="isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
-        @click="toggleSidebar"
+  <div class="h-screen w-screen overflow-hidden bg-[var(--app-bg)] text-[var(--app-fg)] font-sans antialiased">
+    <div class="flex h-full w-full overflow-hidden bg-[var(--app-surface)]">
+      <aside
+        class="relative hidden shrink-0 border-r border-[var(--app-border)] bg-[var(--app-surface)]/98 md:flex md:flex-col"
+        :class="[isSidebarCollapsed ? 'w-24' : 'w-[280px]']"
       >
-        <span
-          v-if="!isSidebarCollapsed"
-          class="i-mdi-chevron-double-left h-5 w-5 transition-transform duration-200 group-hover:-translate-x-0.5"
-        />
-        <span
-          v-else
-          class="i-mdi-chevron-double-right h-5 w-5 transition-transform duration-200 group-hover:translate-x-0.5"
-        />
-      </button>
+        <div class="px-6 pb-6 pt-10" :class="isSidebarCollapsed ? 'px-4' : ''">
+          <div class="flex items-start gap-4" :class="isSidebarCollapsed ? 'flex-col items-center gap-3' : ''">
+            <div
+              class="flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--app-accent)] text-[var(--app-primary-strong)]"
+            >
+              <div class="i-mdi-train-car-passenger text-[1.8rem]" />
+            </div>
+            <div v-if="!isSidebarCollapsed" class="flex min-w-0 flex-1 items-start justify-between gap-3">
+              <div class="min-w-0">
+                <div class="text-[1.05rem] font-black tracking-tight text-[var(--app-primary-strong)]">
+                  Station Service
+                </div>
+                <div class="text-sm text-[var(--app-muted)]">Operations Console</div>
+              </div>
 
-      <div
-        class="border-b border-[var(--app-border)] overflow-hidden"
-        :class="
-          isSidebarCollapsed
-            ? 'h-20 flex flex-col items-center justify-center gap-2 py-3'
-            : 'h-16 flex items-center px-4 whitespace-nowrap'
-        "
-      >
-        <div
-          class="rounded-lg bg-gradient-to-br from-sky-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-sky-900/20"
-          :class="isSidebarCollapsed ? 'w-9 h-9' : 'w-8 h-8'"
-        >
-          <div class="i-mdi-rocket-launch text-[var(--app-fg-strong)] text-lg" />
+              <button
+                type="button"
+                class="group flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[var(--app-border)] bg-[var(--app-surface-2)] text-[var(--app-muted)] transition-all duration-200 hover:border-[var(--app-primary)] hover:text-[var(--app-primary-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-primary)]/30"
+                :aria-label="isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
+                @click="toggleSidebar"
+              >
+                <span
+                  class="i-mdi-chevron-double-left h-5 w-5 transition-transform duration-200 group-hover:-translate-x-0.5"
+                />
+              </button>
+            </div>
+
+            <button
+              v-else
+              type="button"
+              class="group flex h-9 w-9 items-center justify-center rounded-full border border-[var(--app-border)] bg-[var(--app-surface-2)] text-[var(--app-muted)] transition-all duration-200 hover:border-[var(--app-primary)] hover:text-[var(--app-primary-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-primary)]/30"
+              :aria-label="isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
+              @click="toggleSidebar"
+            >
+              <span
+                class="i-mdi-chevron-double-right h-5 w-5 transition-transform duration-200 group-hover:translate-x-0.5"
+              />
+            </button>
+          </div>
         </div>
 
-        <span v-if="!isSidebarCollapsed" class="font-bold text-lg tracking-tight text-[var(--app-fg-strong)] ml-3"
-          >Tauri App</span
-        >
-      </div>
-
-      <nav class="flex-1 p-3 space-y-2 overflow-y-auto overflow-x-hidden">
-        <button
-          v-for="item in navItems"
-          :key="item.id"
-          @click="setView(item.id)"
-          :title="isSidebarCollapsed ? item.label : undefined"
-          :aria-label="item.label"
-          type="button"
-          class="w-full flex items-center rounded-xl transition-all duration-200 group relative"
-          :class="[
-            store.currentView === item.id
-              ? 'bg-[var(--app-nav-active-bg)] text-sky-400 shadow-md shadow-black/10'
-              : 'text-[var(--app-muted)] hover:bg-[var(--app-hover)] hover:text-[var(--app-fg)]',
-            isSidebarCollapsed ? 'h-12 w-12 mx-auto justify-center' : 'px-3 py-3',
-          ]"
-        >
-          <div
+        <nav class="flex-1 space-y-3 px-4 pb-6 overflow-y-auto overflow-x-hidden">
+          <button
+            v-for="item in navItems"
+            :key="item.id"
+            @click="setView(item.id)"
+            :title="isSidebarCollapsed ? item.label : undefined"
+            :aria-label="item.label"
+            type="button"
+            class="group flex w-full items-center rounded-full border transition-all duration-200"
             :class="[
-              item.icon,
-              'transition-colors shrink-0',
-              isSidebarCollapsed ? 'text-2xl' : 'text-xl',
               store.currentView === item.id
-                ? 'text-sky-400'
-                : 'text-[var(--app-muted)] group-hover:text-[var(--app-fg)]',
+                ? 'border-transparent bg-[var(--app-nav-active-bg)] text-[var(--app-primary-strong)] shadow-[inset_0_0_0_1px_rgba(156,123,215,0.08)]'
+                : 'border-transparent text-[var(--app-muted)] hover:border-[var(--app-border)] hover:bg-[var(--app-surface-2)] hover:text-[var(--app-fg)]',
+              isSidebarCollapsed ? 'mx-auto h-12 w-12 justify-center' : 'px-5 py-4',
             ]"
-          />
+          >
+            <div
+              :class="[
+                item.icon,
+                'shrink-0 transition-colors',
+                isSidebarCollapsed ? 'text-2xl' : 'text-[1.35rem]',
+                store.currentView === item.id
+                  ? 'text-[var(--app-primary-strong)]'
+                  : 'text-[var(--app-muted)] group-hover:text-[var(--app-primary-strong)]',
+              ]"
+            />
 
-          <span v-if="!isSidebarCollapsed" class="font-medium whitespace-nowrap ml-3">{{ item.label }}</span>
-        </button>
-      </nav>
+            <div v-if="!isSidebarCollapsed" class="ml-4 flex min-w-0 flex-1 items-center justify-between gap-3">
+              <span class="truncate text-[1.05rem] font-semibold">{{ item.label }}</span>
+            </div>
+          </button>
+        </nav>
 
-      <div class="p-3 border-t border-[var(--app-border)] flex flex-col gap-2">
-        <div
-          v-if="!isSidebarCollapsed"
-          class="rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-2)] px-3 py-2 text-xs"
-        >
-          <div class="font-medium text-[var(--app-fg)]">{{ authStore.user?.name }}</div>
-          <div class="text-[var(--app-muted)]">{{ authStore.user?.stationId }} · {{ authStore.user?.role }}</div>
+        <div class="border-t border-[var(--app-border)] px-4 pb-6 pt-5">
+          <button
+            type="button"
+            class="flex w-full items-center rounded-full px-4 py-3 text-left text-[var(--app-danger)] transition-colors hover:bg-[var(--app-surface-2)]"
+            :class="isSidebarCollapsed ? 'justify-center px-0' : ''"
+            @click="handleLogout"
+          >
+            <span class="i-mdi-logout text-xl" />
+            <span v-if="!isSidebarCollapsed" class="ml-4 text-lg font-medium">登出</span>
+          </button>
         </div>
+      </aside>
 
-        <button
-          type="button"
-          class="w-full rounded-lg border border-[var(--app-border)] px-3 py-2 text-sm text-[var(--app-muted)] transition-colors hover:bg-[var(--app-hover)] hover:text-[var(--app-fg)]"
-          @click="handleLogout"
-        >
-          <span class="i-mdi-logout mr-1" />
-          Sign out
-        </button>
+      <main class="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-[var(--app-surface-3)]">
+        <header class="border-b border-[var(--app-border)] bg-[var(--app-surface)] px-6 py-5 md:px-10">
+          <div class="flex items-center justify-between gap-4">
+            <div>
+              <div class="text-[2rem] font-black tracking-tight text-[var(--app-fg-strong)] md:text-[2.2rem]">
+                {{ currentNavItem.label }}
+              </div>
+            </div>
+
+            <div class="flex items-center gap-4">
+              <div class="hidden text-right md:block">
+                <div class="text-lg font-semibold text-[var(--app-fg-strong)]">{{ userMeta }}</div>
+                <div class="text-sm text-[var(--app-muted)]">{{ authStore.user?.name }}</div>
+              </div>
+              <div
+                class="flex h-14 w-14 items-center justify-center rounded-full bg-[var(--app-accent)] text-2xl font-bold text-[var(--app-primary-strong)]"
+              >
+                {{ userInitial }}
+              </div>
+            </div>
+          </div>
+        </header>
 
         <div
-          class="text-xs text-[var(--app-muted-2)] text-center overflow-hidden whitespace-nowrap transition-opacity duration-300"
-          :class="[isSidebarCollapsed ? 'opacity-0 h-0' : 'opacity-100']"
+          class="flex-1 overflow-y-auto pb-20 md:pb-0 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-[color:var(--app-scrollbar-thumb)]"
         >
-          v{{ store.version }}
+          <slot />
         </div>
-      </div>
-    </aside>
+      </main>
+    </div>
 
-    <!-- Main Content -->
-    <main class="flex-1 flex flex-col relative overflow-hidden bg-[var(--app-bg)]">
-      <div
-        class="flex-1 overflow-y-auto pb-20 md:pb-0 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-[color:var(--app-scrollbar-thumb)]"
-      >
-        <slot />
-      </div>
-    </main>
-
-    <!-- Mobile Bottom Nav -->
     <nav
       class="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-[var(--app-surface)] border-t border-[var(--app-border)] flex items-center justify-around z-50 pb-safe"
     >
@@ -154,10 +174,10 @@ async function handleLogout() {
         :key="item.id"
         @click="setView(item.id)"
         class="flex flex-col items-center justify-center w-full h-full space-y-1 active:scale-95 transition-transform"
-        :class="[store.currentView === item.id ? 'text-sky-400' : 'text-[var(--app-muted)]']"
+        :class="[store.currentView === item.id ? 'text-[var(--app-primary-strong)]' : 'text-[var(--app-muted)]']"
       >
         <div :class="[item.icon, 'text-2xl']" />
-        <span class="text-[10px] font-medium">{{ item.label }}</span>
+        <span class="text-[10px] font-medium">{{ item.shortLabel }}</span>
       </button>
     </nav>
   </div>

@@ -60,7 +60,7 @@ export const useStore = defineStore('main', {
     debug: import.meta.env.MODE === 'development',
     version: versionString,
     isInitialized: false,
-    currentView: 'home' as 'home' | 'settings' | 'notifications' | 'stream-test',
+    currentView: 'notifications' as 'home' | 'settings' | 'notifications' | 'stream-test',
     sidebarCollapsed: false,
     minimizeToTrayOnClose: false,
     themePreference: 'system' as ThemePreference,

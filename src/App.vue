@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import AppShell from './components/AppShell.vue'
-import HomeView from './components/HomeView.vue'
 import SettingsView from './components/SettingsView.vue'
 import NotificationsView from './components/NotificationsView.vue'
 import LoginView from './components/LoginView.vue'
@@ -49,9 +48,8 @@ watch(
 <template>
   <LoginView v-if="!authStore.isAuthenticated" />
   <AppShell v-else>
-    <HomeView v-if="store.currentView === 'home'" />
+    <NotificationsView v-if="store.currentView === 'notifications' || store.currentView === 'home'" />
     <SettingsView v-else-if="store.currentView === 'settings'" />
-    <NotificationsView v-else-if="store.currentView === 'notifications'" />
     <StreamTestView v-else-if="store.currentView === 'stream-test'" />
   </AppShell>
 </template>
