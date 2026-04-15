@@ -49,14 +49,14 @@ async function handleLogout() {
         :class="[isSidebarCollapsed ? 'w-24' : 'w-[280px]']"
       >
         <div class="px-6 pb-6 pt-10" :class="isSidebarCollapsed ? 'px-4' : ''">
-          <div class="flex items-start gap-4" :class="isSidebarCollapsed ? 'flex-col items-center gap-3' : ''">
+          <div class="flex items-center gap-4" :class="isSidebarCollapsed ? 'flex-col items-center gap-3' : ''">
             <div
               class="flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--app-accent)] text-[var(--app-primary-strong)]"
             >
               <div class="i-mdi-train-car-passenger text-[1.8rem]" />
             </div>
-            <div v-if="!isSidebarCollapsed" class="flex min-w-0 flex-1 items-start justify-between gap-3">
-              <div class="min-w-0">
+            <div v-if="!isSidebarCollapsed" class="flex min-w-0 flex-1 items-center justify-between gap-3">
+              <div class="min-w-0 self-center">
                 <div class="text-[1.05rem] font-black tracking-tight text-[var(--app-primary-strong)]">
                   Station Service
                 </div>
