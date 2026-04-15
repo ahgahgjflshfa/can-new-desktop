@@ -1,163 +1,118 @@
 # AGENTS Guide for can-new-desktop
 
-Last updated: 2026-03-19
+Last updated: 2026-04-15
 Scope: Repository root (`/home/ahgahgjflshfa/projects/can-new-desktop`)
 
-## Project Snapshot
+## What this repo actually is
 
 - Stack: Tauri 2 + Vue 3 + Vite + TypeScript + Pinia + Tailwind CSS 4.
-- Frontend code lives in `src/`; Rust backend code lives in `src-tauri/`.
-- App has multiple windows (main + popup flow).
-- Tests use Vitest with jsdom.
+- The app has **two frontend entrypoints**, not one:
+  - main window: `index.html` → `src/main.ts` → `src/App.vue`
+  - popup window: `popup.html` → `src/popup-main.ts` → `src/PopupApp.vue`
+- Rust entrypoint is `src-tauri/src/main.rs`, which delegates to `src-tauri/src/lib.rs`.
+- `src-tauri/AGENTS.md` has the backend-specific rules; read it before changing Rust or window/capability behavior.
 
-## High-Value Locations
+## High-value files
 
-- `src/store.ts`: app-wide settings store.
-- `src/stores/notificationStore.ts`: notification state and popup orchestration.
-- `src/services/notificationPoller.ts`: polling service boundary.
-- `src/services/mockServer.ts`: mock notification source.
-- `src/services/stream/playerCore.ts`: HLS player controller and playback state authority.
-- `src/components/stream/ManagedStreamPlayer.vue`: stream container that wires the player controller to the UI.
-- `src/PopupApp.vue`: popup UI behavior.
-- `src-tauri/src/lib.rs`: Tauri commands, windows/tray lifecycle.
-- `src-tauri/AGENTS.md`: backend-specific Rust guidance.
+- `src/App.vue`: gates notification runtime on auth state.
+- `src/main.ts`: initializes Pinia, loads persisted settings, applies theme, and hydrates auth before mount.
+- `src/store.ts`: app-wide settings, theme handling, and minimize-to-tray sync to Rust.
+- `src/stores/authStore.ts`: persisted auth token/user, plus API token provider hookup.
+- `src/stores/notificationStore.ts`: main notification orchestrator; owns polling, popup show/hide decisions, and Rust dismiss-event handling.
+- `src/services/notificationPoller.ts`: singleton polling boundary.
+- `src/services/taskActionService.ts`: task reply/complete calls into Rust with auth token lookup.
+- `src/services/stream/playerCore.ts`: frontend-only HLS playback state authority.
+- `src-tauri/src/lib.rs`: registered Tauri commands and global state.
+- `src-tauri/src/popup_commands.rs`: dynamic popup window creation and popup IPC.
+- `src-tauri/src/window_controls.rs`: main window visibility / always-on-top behavior.
+- `src-tauri/tauri.conf.json`: only the `main` window is declared here; the popup is created dynamically in Rust.
 
-## Build, Test, and Validation Commands
+## Commands you can trust
 
-Source of truth: `package.json`, `vitest.config.ts`, `README.md`, and `src-tauri/Cargo.toml`.
-
-### Frontend / App Commands
+Use `pnpm`, not npm/yarn/bun.
 
 - Install deps: `pnpm i`
-- Frontend dev (vite + devtools): `pnpm dev`
-- Vite-only dev server: `pnpm vite:dev`
-- Run Tauri app in dev: `pnpm tauri dev`
-- Build frontend bundle: `pnpm build`
-- Type-check frontend: `pnpm type-check`
-- Run Vitest suite: `pnpm test`
+- Frontend dev server only: `pnpm vite:dev`
+- Frontend dev server + Vue devtools: `pnpm dev`
+- Full Tauri app in dev: `pnpm tauri dev`
+- Fast frontend typecheck: `pnpm type-check`
+- Frontend production build: `pnpm build`
+- Full desktop build: `pnpm tauri build`
+- Unit tests: `pnpm test`
 - Preview built frontend: `pnpm preview`
-- Build desktop app bundle: `pnpm tauri build`
+- Rust check via package script: `pnpm check`
 
-### Single-Test Execution (Vitest)
-
-- Single file:
-  - `pnpm test tests/unit/notificationStore.test.ts`
-- Single test name pattern:
-  - `pnpm test -- --testNamePattern="handles poll errors"`
-  - `pnpm test -- -t "handles poll errors"`
-- Single test name in a specific file:
-  - `pnpm test tests/unit/notificationStore.test.ts -- -t "initializes polling"`
-- Watch mode:
-  - `pnpm test -- --watch`
-
-Notes:
-
-- Use `--` to forward flags through pnpm to Vitest.
-- Include patterns are defined in `vitest.config.ts`:
-  - `tests/unit/**/*.test.ts`
-  - `src/**/*.spec.ts`
-
-### Rust Backend Commands
-
-- Cargo check via script: `pnpm check`
-- Direct cargo check: `cargo check --manifest-path src-tauri/Cargo.toml`
-- Rust tests: `cargo test --manifest-path src-tauri/Cargo.toml`
-- Rust lint (warnings fail): `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings`
-- Rust format: `cargo fmt --manifest-path src-tauri/Cargo.toml`
-
-### Lint / Format
-
-There is no dedicated root `lint` script.
-Use direct commands when needed:
+There is **no** root `lint` or `format` script. Use direct commands when needed:
 
 - ESLint: `pnpm eslint . --fix`
 - Prettier: `pnpm prettier -w .`
+- Rust tests: `cargo test --manifest-path src-tauri/Cargo.toml`
+- Rust lint: `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings`
+- Rust format: `cargo fmt --manifest-path src-tauri/Cargo.toml`
 
-## Code Style Guidelines
+## Validation shortcuts that save time
 
-These rules come from `.prettierrc.json`, `.editorconfig`, `eslint.config.cjs`, tsconfig, and existing code patterns.
+- Vitest includes only `tests/unit/**/*.test.ts` and `src/**/*.spec.ts`.
+- Single-file test: `pnpm test tests/unit/notificationStore.test.ts`
+- By test name: `pnpm test -- -t "handles poll errors"`
+- File + name: `pnpm test tests/unit/notificationStore.test.ts -- -t "initializes polling"`
+- Watch mode: `pnpm test -- --watch`
 
-### Formatting
+Useful verification order:
 
-- Prettier:
-  - `semi: false`
-  - `singleQuote: true`
-  - `tabWidth: 2`
-  - `printWidth: 120`
-  - `arrowParens: avoid`
-  - `trailingComma: es5`
-- EditorConfig:
-  - JS/TS/Vue files: 2 spaces
-  - HTML files: 4 spaces
-  - UTF-8, final newline, trim trailing whitespace
+1. `pnpm type-check`
+2. targeted `pnpm test ...`
+3. `pnpm build` if you touched Vite entrypoints, generated imports/components, or frontend app wiring
+4. `pnpm check` / Rust commands if you touched `src-tauri/`
 
-### Imports and Modules
+Why this order matters:
 
-- Prefer alias imports from `@/*` for frontend (`tsconfig.app.json` + `vite.config.ts`).
+- `pnpm build` already runs `vue-tsc --noEmit` first.
+- `pnpm tauri build` already runs `pnpm build` first via `src-tauri/tauri.conf.json` `beforeBuildCommand`.
+- CI currently verifies `pnpm test` and `pnpm tauri build`; there is no verified CI lint job.
+
+## Repo-specific wiring that is easy to miss
+
+- `src/App.vue` only initializes the notification runtime when `authStore.isAuthenticated` becomes true. If notifications seem "broken," check auth flow first.
+- `src/stores/notificationStore.ts` is the real cross-runtime bridge:
+  - starts/stops `notificationPoller`
+  - invokes Rust popup commands (`show_alert_popup`)
+  - listens for Rust `dismiss-notification` events
+- Popup delivery is intentionally redundant to avoid a race:
+  - Rust emits `show-notification`
+  - `src/PopupApp.vue` also calls `get_pending_notification()` on mount in case the event fired before Vue listeners were ready
+- Popup task actions (`reply_task`, `complete_task`) depend on an auth token from `apiClient` or persisted auth storage; if popup actions fail, inspect `src/services/taskActionService.ts` and `src/stores/authStore.ts` together.
+- Stream playback is frontend-only (`src/services/stream/playerCore.ts`, `src/stores/streamStore.ts`, stream components). Do not assume Rust is involved there.
+
+## Tauri / windowing constraints
+
+- The popup window label is `alert-popup`; its permissions live in `src-tauri/capabilities/popup.json`.
+- The main window permissions live in `src-tauri/capabilities/default.json`.
+- If you add a new Tauri capability-dependent feature, update the matching file in `src-tauri/capabilities/` or it can fail as a silent permission issue.
+- Closing the popup is handled in Rust by hiding the window instead of destroying it; validate both frontend popup behavior and Rust window handling when changing popup flows.
+
+## Tests and generated files
+
+- Vitest runs in `jsdom` with globals enabled and setup from `tests/setup/testglobals.ts`.
+- `tests/setup/testglobals.ts` installs Pinia with real actions (`stubActions: false`), so store tests execute actual action code unless they mock dependencies.
+- Do not hand-edit generated files unless the task is specifically about generation:
+  - `auto-imports.d.ts`
+  - `src/auto-imports.d.ts`
+  - `components.d.ts`
+  - `.eslintrc-auto-import.json`
+  - `src-tauri/gen/*`
+
+## Style and repo conventions worth preserving
+
+- Use `@/*` imports for frontend modules.
 - Use `import type` for type-only imports.
+- Vue SFCs use `<script setup lang="ts">`.
+- JS/TS/Vue use 2-space indentation; HTML uses 4 spaces (`.editorconfig`).
+- `eslint.config.cjs` keeps `no-var` as error and reserves underscore-prefixed unused variables/args.
+- Do not silently swallow errors; this repo generally logs actionable failures with `console.warn` / `console.error`.
 
-### TypeScript and Types
+## Existing instruction files checked
 
-- Prefer explicit domain types in `src/types/*`.
-- Avoid `any` unless a boundary absolutely forces it.
-- Avoid suppression comments (`@ts-ignore`, `@ts-expect-error`) in normal flow.
-- Use primitive `string`/`number`/`boolean` instead of boxed `String`/`Number`/`Boolean`.
-
-### Naming
-
-- Types/interfaces/classes/components: PascalCase.
-- Store composables: `useXxxStore`.
-- Variables/functions/methods: camelCase.
-- Constants: UPPER_SNAKE_CASE for true constants.
-- Vue SFC filenames: PascalCase.
-
-### Vue and Pinia
-
-- Use `<script setup lang="ts">` for Vue SFCs.
-- Keep store `state`, `getters`, and `actions` clearly separated.
-- Keep side effects in actions/services, not getters.
-
-### Error Handling
-
-- Do not silently swallow errors.
-- Add contextual logs (`console.warn`/`console.error`) where failures are actionable.
-- For Tauri commands in Rust, return `Result<T, String>` and map errors deliberately.
-- Avoid empty catch blocks.
-
-### ESLint Conventions Worth Keeping
-
-- `no-var` is error.
-- In production: `no-console` and `no-debugger` become warnings.
-- `@typescript-eslint/no-unused-vars` enforces underscore-ignore conventions (`^_`).
-
-## Testing Guidance
-
-- Preferred unit test locations:
-  - `tests/unit/**/*.test.ts`
-  - `src/**/*.spec.ts`
-- Use deterministic tests; avoid uncontrolled timers/network dependencies.
-
-## Generated and Tool-Managed Files
-
-Do not hand-edit generated declaration or schema files unless task explicitly requires it.
-
-- `auto-imports.d.ts`
-- `components.d.ts`
-- `src/auto-imports.d.ts`
-- `src-tauri/gen/schemas/*`
-
-## Agent Guardrails
-
-- Keep changes scoped to the request.
-- If changing popup behavior, validate both frontend popup flow and Rust window handling.
-- If command/script behavior changes, update this AGENTS.md in the same change.
-
-## Cursor / Copilot Rules
-
-Checked locations:
-
-- `.cursor/rules/`
-- `.cursorrules`
-- `.github/copilot-instructions.md`
-
-Result: no Cursor or Copilot rule files are present in this repository at the time of writing.
+- Root: `AGENTS.md` (this file)
+- Backend: `src-tauri/AGENTS.md`
+- Not present: `.cursor/rules/`, `.cursorrules`, `.github/copilot-instructions.md`, `opencode.json`
