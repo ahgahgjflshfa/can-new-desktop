@@ -61,7 +61,6 @@ export const useStore = defineStore('main', {
     version: versionString,
     isInitialized: false,
     currentView: 'notifications' as 'home' | 'settings' | 'notifications' | 'stream-test',
-    sidebarCollapsed: false,
     minimizeToTrayOnClose: false,
     themePreference: 'system' as ThemePreference,
   }),
@@ -73,11 +72,6 @@ export const useStore = defineStore('main', {
       void syncMinimizeToTraySettingToBackend(this.minimizeToTrayOnClose)
       this.isInitialized = true
       console.log('app initialized!')
-    },
-
-    toggleSidebar() {
-      this.sidebarCollapsed = !this.sidebarCollapsed
-      this.saveSettingsToStorage()
     },
 
     setMinimizeToTrayOnClose(enabled: boolean) {
@@ -126,12 +120,6 @@ export const useStore = defineStore('main', {
       if (typeof minimizeToTrayOnClose === 'boolean') {
         this.minimizeToTrayOnClose = minimizeToTrayOnClose
       }
-
-      const sidebarCollapsed = record.sidebarCollapsed
-      if (typeof sidebarCollapsed === 'boolean') {
-        this.sidebarCollapsed = sidebarCollapsed
-      }
-
       const themePreference = record.themePreference
       if (themePreference === 'dark' || themePreference === 'light' || themePreference === 'system') {
         this.themePreference = themePreference
@@ -149,7 +137,6 @@ export const useStore = defineStore('main', {
 
       const payload = {
         minimizeToTrayOnClose: this.minimizeToTrayOnClose,
-        sidebarCollapsed: this.sidebarCollapsed,
         themePreference: this.themePreference,
       }
 
