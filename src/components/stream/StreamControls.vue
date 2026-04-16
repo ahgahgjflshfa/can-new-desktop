@@ -36,7 +36,7 @@ const primaryAction = computed(() => (canPause.value ? 'pause' : 'play'))
       @click="primaryAction === 'pause' ? $emit('pause') : $emit('play')"
     >
       <span :class="primaryAction === 'pause' ? 'i-mdi-pause' : 'i-mdi-play'" class="text-base" />
-      {{ primaryAction === 'pause' ? 'Pause' : 'Play' }}
+      {{ primaryAction === 'pause' ? '暫停' : '播放' }}
     </button>
 
     <button
@@ -46,7 +46,7 @@ const primaryAction = computed(() => (canPause.value ? 'pause' : 'play'))
       @click="$emit('stop')"
     >
       <span class="i-mdi-stop text-base" />
-      Stop
+      停止
     </button>
 
     <button
@@ -55,7 +55,7 @@ const primaryAction = computed(() => (canPause.value ? 'pause' : 'play'))
       @click="$emit('toggleMute')"
     >
       <span :class="props.muted ? 'i-mdi-volume-off' : 'i-mdi-volume-high'" class="text-base" />
-      {{ props.muted ? 'Unmute' : 'Mute' }}
+      {{ props.muted ? '取消靜音' : '靜音' }}
     </button>
 
     <button
@@ -65,7 +65,7 @@ const primaryAction = computed(() => (canPause.value ? 'pause' : 'play'))
       @click="$emit('retry')"
     >
       <span class="i-mdi-refresh text-base" />
-      Retry
+      重試
     </button>
   </div>
 </template>

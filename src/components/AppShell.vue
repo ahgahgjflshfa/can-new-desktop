@@ -7,16 +7,16 @@ const store = useStore()
 const authStore = useAuthStore()
 
 const navItems = [
-  { id: 'notifications', label: 'Alerts', shortLabel: 'Alerts', icon: 'i-mdi-bell-ring-outline' },
-  { id: 'stream-test', label: 'Stream Test', shortLabel: 'Streams', icon: 'i-mdi-play-box-multiple-outline' },
-  { id: 'settings', label: 'Settings', shortLabel: 'Settings', icon: 'i-mdi-cog-outline' },
+  { id: 'notifications', label: '警示通知', shortLabel: '警示', icon: 'i-mdi-bell-ring-outline' },
+  { id: 'stream-test', label: '串流測試', shortLabel: '串流', icon: 'i-mdi-play-box-multiple-outline' },
+  { id: 'settings', label: '設定', shortLabel: '設定', icon: 'i-mdi-cog-outline' },
 ] as const
 
 const currentNavItem = computed(() => navItems.find(item => item.id === store.currentView) ?? navItems[0])
 
 const userInitial = computed(() => authStore.user?.name?.trim().charAt(0).toUpperCase() ?? 'A')
 
-const userMeta = computed(() => authStore.user?.stationId ?? authStore.user?.role ?? 'Station Service')
+const userMeta = computed(() => authStore.user?.stationId ?? authStore.user?.role ?? '車站服務')
 
 function setView(view: typeof store.currentView) {
   store.currentView = view
@@ -42,10 +42,8 @@ async function handleLogout() {
             </div>
             <div class="flex min-w-0 flex-1 items-center justify-between gap-3">
               <div class="min-w-0 self-center">
-                <div class="text-[0.98rem] font-black tracking-tight text-[var(--app-primary-strong)]">
-                  Station Service
-                </div>
-                <div class="text-[0.82rem] text-[var(--app-muted)]">Operations Console</div>
+                <div class="text-[0.98rem] font-black tracking-tight text-[var(--app-primary-strong)]">車站服務</div>
+                <div class="text-[0.82rem] text-[var(--app-muted)]">營運控制台</div>
               </div>
             </div>
           </div>

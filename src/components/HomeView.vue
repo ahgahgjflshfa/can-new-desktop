@@ -24,21 +24,21 @@ const connectionStatusClass = computed(() => {
 })
 
 const connectionStatusText = computed(() => {
-  if (!notificationStore.isPolling) return 'Stopped'
-  return notificationStore.pollingStats.isConnected ? 'Connected' : 'Disconnected'
+  if (!notificationStore.isPolling) return '已停止'
+  return notificationStore.pollingStats.isConnected ? '已連線' : '未連線'
 })
 
 const lastPollDisplay = computed(() => {
   const lastPoll = notificationStore.pollingStats.lastPollTime
-  if (!lastPoll) return 'Never'
+  if (!lastPoll) return '尚未'
 
   const lastPollMs = lastPoll instanceof Date ? lastPoll.getTime() : new Date(lastPoll).getTime()
-  if (!Number.isFinite(lastPollMs)) return 'Never'
+  if (!Number.isFinite(lastPollMs)) return '尚未'
 
   const seconds = Math.max(0, Math.floor((now.value.getTime() - lastPollMs) / 1000))
-  if (seconds < 60) return `${seconds}s ago`
+  if (seconds < 60) return `${seconds} 秒前`
   const minutes = Math.floor(seconds / 60)
-  return `${minutes}m ago`
+  return `${minutes} 分鐘前`
 })
 
 function formatTime(isoString: string): string {
@@ -59,13 +59,11 @@ function goToAlerts() {
   <div class="space-y-6 px-6 py-6 md:px-8 md:py-8">
     <div class="flex items-center justify-between">
       <div>
-        <h1 class="text-2xl font-bold text-[var(--app-fg-strong)]">Dashboard</h1>
-        <p class="mt-1 text-sm text-[var(--app-muted)]">
-          Monitor alert activity, connection health, and recent station events.
-        </p>
+        <h1 class="text-2xl font-bold text-[var(--app-fg-strong)]">總覽儀表板</h1>
+        <p class="mt-1 text-sm text-[var(--app-muted)]">檢視警示動態、連線狀態，以及最近的車站事件。</p>
       </div>
       <div class="flex items-center gap-4 text-sm text-[var(--app-muted)]">
-        <span>Last poll: {{ lastPollDisplay }}</span>
+        <span>上次輪詢：{{ lastPollDisplay }}</span>
         <div class="flex items-center gap-1.5">
           <span class="w-2 h-2 rounded-full" :class="connectionStatusClass" />
           <span>{{ connectionStatusText }}</span>
@@ -86,7 +84,7 @@ function goToAlerts() {
     >
       <div class="flex items-center justify-between">
         <div>
-          <div class="text-sm text-[var(--app-muted)] mb-1">Unread Alerts</div>
+          <div class="text-sm text-[var(--app-muted)] mb-1">未讀警示</div>
           <div class="flex items-baseline gap-3">
             <span
               class="text-5xl font-bold"
@@ -95,18 +93,18 @@ function goToAlerts() {
               {{ notificationStore.unreadCount }}
             </span>
             <span v-if="notificationStore.pendingAlertCount > 0" class="font-medium text-[var(--app-danger)]">
-              ({{ notificationStore.pendingAlertCount }} pending)
+              （{{ notificationStore.pendingAlertCount }} 筆待處理）
             </span>
           </div>
         </div>
         <div class="flex gap-4 text-sm">
           <div class="text-center">
             <div class="text-2xl font-semibold text-[var(--app-fg-strong)]">{{ notificationStore.alertsToday }}</div>
-            <div class="text-[var(--app-muted)]">Today</div>
+            <div class="text-[var(--app-muted)]">今天</div>
           </div>
           <div class="text-center">
             <div class="text-2xl font-semibold text-[var(--app-fg-strong)]">{{ notificationStore.alertsThisWeek }}</div>
-            <div class="text-[var(--app-muted)]">This Week</div>
+            <div class="text-[var(--app-muted)]">本週</div>
           </div>
         </div>
       </div>
@@ -114,20 +112,20 @@ function goToAlerts() {
 
     <div class="overflow-hidden rounded-[1.5rem] border border-[var(--app-border)] bg-[var(--app-surface)]">
       <div class="flex items-center justify-between px-4 py-3 border-b border-[var(--app-border)]">
-        <h2 class="font-semibold text-[var(--app-fg-strong)]">Recent Activity</h2>
+        <h2 class="font-semibold text-[var(--app-fg-strong)]">最近活動</h2>
         <button
           type="button"
           class="text-sm text-[var(--app-primary-strong)] transition-colors hover:text-[var(--app-primary)]"
           @click="goToAlerts"
         >
-          View All
+          查看全部
         </button>
       </div>
 
       <div v-if="notificationStore.recentNotifications.length === 0" class="p-12 text-center text-[var(--app-muted)]">
         <span class="i-mdi-bell-outline text-5xl opacity-30 mb-3 block" />
-        <div class="text-lg">No notifications yet</div>
-        <div class="text-sm text-[var(--app-muted-2)]">Emergency alerts will appear here</div>
+        <div class="text-lg">目前尚無通知</div>
+        <div class="text-sm text-[var(--app-muted-2)]">新的緊急警示會顯示在這裡</div>
       </div>
 
       <div v-else class="divide-y divide-[var(--app-border)]">
@@ -166,7 +164,7 @@ function goToAlerts() {
       <div class="flex items-start gap-3">
         <span class="i-mdi-alert-circle text-xl shrink-0 text-[var(--app-danger)]" />
         <div>
-          <div class="font-medium text-[var(--app-danger)]">Connection Error</div>
+          <div class="font-medium text-[var(--app-danger)]">連線錯誤</div>
           <div class="text-sm text-[color:rgba(87,52,52,0.82)]">{{ notificationStore.pollingStats.lastError }}</div>
         </div>
       </div>

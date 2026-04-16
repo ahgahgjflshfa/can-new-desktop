@@ -35,10 +35,10 @@ function formatDate(dateString: string): string {
   const diffHours = Math.floor(diffMs / 3600000)
   const diffDays = Math.floor(diffMs / 86400000)
 
-  if (diffMins < 1) return 'Just now'
-  if (diffMins < 60) return `${diffMins}m ago`
-  if (diffHours < 24) return `${diffHours}h ago`
-  if (diffDays < 7) return `${diffDays}d ago`
+  if (diffMins < 1) return '剛剛'
+  if (diffMins < 60) return `${diffMins} 分鐘前`
+  if (diffHours < 24) return `${diffHours} 小時前`
+  if (diffDays < 7) return `${diffDays} 天前`
   return date.toLocaleDateString()
 }
 
@@ -84,11 +84,11 @@ const visibleNotifications = computed(() => {
 function getStatusBadge(notification: NotificationState): { text: string; class: string } {
   switch (notification.status) {
     case 'pending':
-      return { text: 'New', class: 'bg-[var(--app-primary-surface)] text-[var(--app-primary-strong)]' }
+      return { text: '新通知', class: 'bg-[var(--app-primary-surface)] text-[var(--app-primary-strong)]' }
     case 'shown':
-      return { text: 'Active', class: 'bg-[color:rgba(212,139,42,0.14)] text-[var(--app-warning)]' }
+      return { text: '處理中', class: 'bg-[color:rgba(212,139,42,0.14)] text-[var(--app-warning)]' }
     case 'dismissed':
-      return { text: 'Dismissed', class: 'bg-[var(--app-surface-2)] text-[var(--app-muted)]' }
+      return { text: '已關閉', class: 'bg-[var(--app-surface-2)] text-[var(--app-muted)]' }
   }
 }
 </script>
@@ -101,7 +101,7 @@ function getStatusBadge(notification: NotificationState): { text: string; class:
           <span
             class="rounded-full bg-[var(--app-primary-surface)] px-3 py-1 text-sm font-medium text-[var(--app-primary-strong)]"
           >
-            {{ notificationStore.unreadCount }} unread
+            {{ notificationStore.unreadCount }} 筆未讀
           </span>
         </div>
 
@@ -148,7 +148,7 @@ function getStatusBadge(notification: NotificationState): { text: string; class:
         <div class="flex items-center justify-between border-b border-[var(--app-border)] p-4">
           <h2 class="flex items-center gap-2 text-xl font-semibold text-[var(--app-fg)]">
             <div class="i-mdi-history text-[var(--app-primary-strong)]" />
-            {{ activeTab === 'active' ? 'In Progress' : 'Completed' }}
+            {{ activeTab === 'active' ? '進行中' : '已完成' }}
           </h2>
 
           <button
@@ -158,7 +158,7 @@ function getStatusBadge(notification: NotificationState): { text: string; class:
             @click="handleClearHistory"
           >
             <span class="i-mdi-delete-sweep mr-1" />
-            Clear dismissed
+            清除已關閉項目
           </button>
         </div>
 
@@ -231,7 +231,7 @@ function getStatusBadge(notification: NotificationState): { text: string; class:
                     :disabled="notificationStore.isTaskActionPending"
                     @click="handleReply(notification.id)"
                   >
-                    Reply
+                    回覆
                   </button>
 
                   <template v-if="notification.priority === 'replied'">
@@ -241,7 +241,7 @@ function getStatusBadge(notification: NotificationState): { text: string; class:
                       :disabled="notificationStore.isTaskActionPending"
                       @click="handleComplete(notification.id, 'normal')"
                     >
-                      Complete: Normal
+                      完成：一般處理
                     </button>
 
                     <button
@@ -250,7 +250,7 @@ function getStatusBadge(notification: NotificationState): { text: string; class:
                       :disabled="notificationStore.isTaskActionPending"
                       @click="handleComplete(notification.id, 'no_passenger')"
                     >
-                      Complete: No Passenger
+                      完成：未載客
                     </button>
                   </template>
                 </div>
@@ -260,7 +260,7 @@ function getStatusBadge(notification: NotificationState): { text: string; class:
                 v-if="notification.status === 'dismissed' || notification.priority === 'completed'"
                 type="button"
                 class="shrink-0 rounded-lg p-2 text-[var(--app-muted)] transition-colors hover:bg-[var(--app-surface-2)] hover:text-[var(--app-danger)]"
-                title="Delete notification"
+                title="刪除通知"
                 @click="handleDelete(notification.id)"
               >
                 <span class="i-mdi-close text-lg" />

@@ -26,22 +26,22 @@ const priorityConfig: Record<NotificationPriority, { bgClass: string; iconClass:
   pending: {
     bgClass: 'bg-red-500/80 border-red-600',
     iconClass: 'i-mdi-alert-circle text-red-100',
-    label: 'PENDING',
+    label: '待處理',
   },
   replied: {
     bgClass: 'bg-orange-500/80 border-orange-600',
     iconClass: 'i-mdi-progress-clock text-orange-100',
-    label: 'REPLIED',
+    label: '已回覆',
   },
   completed: {
     bgClass: 'bg-green-500/80 border-green-600',
     iconClass: 'i-mdi-check-circle text-green-100',
-    label: 'COMPLETED',
+    label: '已完成',
   },
   ignored: {
     bgClass: 'bg-slate-500/80 border-slate-600',
     iconClass: 'i-mdi-eye-off text-slate-100',
-    label: 'IGNORED',
+    label: '已忽略',
   },
 }
 
@@ -70,7 +70,7 @@ async function acknowledgeCurrentAlert() {
   const notificationId = currentNotification.value.id
   const taskId = Number(notificationId)
   if (!Number.isFinite(taskId)) {
-    acknowledgeError.value = 'Invalid task id'
+    acknowledgeError.value = '任務編號無效'
     return
   }
 
@@ -166,7 +166,7 @@ onUnmounted(() => {
           </div>
 
           <div class="mt-2 text-xs font-medium uppercase tracking-[0.16em] text-white/70">
-            {{ currentNotification.unreadCount }} pending
+            {{ currentNotification.unreadCount }} 筆待處理
           </div>
         </div>
       </div>
@@ -181,7 +181,7 @@ onUnmounted(() => {
         @click="acknowledgeCurrentAlert"
       >
         <span class="i-mdi-check-bold mr-1.5" />
-        {{ isAcknowledging ? 'Acknowledging...' : 'Acknowledge' }}
+        {{ isAcknowledging ? '確認中…' : '確認收到' }}
       </button>
 
       <button
@@ -190,7 +190,7 @@ onUnmounted(() => {
         @click="openMainWindow"
       >
         <span class="i-mdi-open-in-new mr-1.5" />
-        Open main app to reply / complete
+        開啟主程式以回覆／完成任務
       </button>
 
       <p v-if="acknowledgeError" class="px-1 text-xs text-white/90">
@@ -201,6 +201,6 @@ onUnmounted(() => {
 
   <!-- Loading/empty state (shouldn't normally be visible) -->
   <div v-else class="h-screen w-screen flex items-center justify-center bg-neutral-900">
-    <p class="text-neutral-500 text-sm">Waiting for alerts...</p>
+    <p class="text-neutral-500 text-sm">等待警示中…</p>
   </div>
 </template>

@@ -12,8 +12,8 @@ const props = withDefaults(
     muted?: boolean
   }>(),
   {
-    title: 'Camera Stream',
-    sourceLabel: 'HLS Source',
+    title: '攝影機串流',
+    sourceLabel: 'HLS 來源',
     muted: false,
   }
 )
@@ -36,9 +36,9 @@ const overlayModel = computed(() => {
     return {
       kind: 'error' as const,
       icon: 'i-mdi-alert-circle-outline',
-      title: 'Playback interrupted',
+      title: '播放已中斷',
       body: props.state.error.message,
-      actionLabel: props.state.error.retryable ? 'Retry Stream' : null,
+      actionLabel: props.state.error.retryable ? '重新嘗試串流' : null,
     }
   }
 
@@ -46,8 +46,8 @@ const overlayModel = computed(() => {
     return {
       kind: 'loading' as const,
       icon: 'i-mdi-refresh animate-spin',
-      title: 'Reconnecting stream',
-      body: 'The connection dropped. Attempting to restore playback.',
+      title: '正在重新連線串流',
+      body: '連線已中斷，正在嘗試恢復播放。',
       actionLabel: null,
     }
   }
@@ -56,8 +56,8 @@ const overlayModel = computed(() => {
     return {
       kind: 'loading' as const,
       icon: 'i-mdi-loading animate-spin',
-      title: 'Loading video',
-      body: 'Preparing the first frames for playback.',
+      title: '正在載入影片',
+      body: '正在準備播放的第一個畫面。',
       actionLabel: null,
     }
   }
@@ -66,9 +66,9 @@ const overlayModel = computed(() => {
     return {
       kind: 'action' as const,
       icon: 'i-mdi-play-circle',
-      title: 'Paused',
-      body: 'Press play to continue from the current frame.',
-      actionLabel: 'Resume',
+      title: '已暫停',
+      body: '按下播放即可從目前畫面繼續。',
+      actionLabel: '繼續播放',
     }
   }
 
@@ -76,9 +76,9 @@ const overlayModel = computed(() => {
     return {
       kind: 'action' as const,
       icon: 'i-mdi-replay',
-      title: 'Playback stopped',
-      body: 'Press play to start the stream again.',
-      actionLabel: 'Play Again',
+      title: '播放已停止',
+      body: '按下播放即可重新開始串流。',
+      actionLabel: '再次播放',
     }
   }
 
@@ -86,9 +86,9 @@ const overlayModel = computed(() => {
     return {
       kind: 'action' as const,
       icon: 'i-mdi-play-circle-outline',
-      title: 'Ready to play',
-      body: 'Start playback when you want to preview the stream.',
-      actionLabel: 'Start Playback',
+      title: '準備播放',
+      body: '需要預覽串流時即可開始播放。',
+      actionLabel: '開始播放',
     }
   }
 
@@ -127,7 +127,7 @@ onMounted(() => {
         class="pointer-events-none absolute left-4 top-4 inline-flex items-center gap-2 rounded-full border border-white/12 bg-slate-950/78 px-3 py-1.5 text-xs font-semibold tracking-[0.12em] text-white shadow-lg shadow-black/25 backdrop-blur-md"
       >
         <span class="i-mdi-loading animate-spin text-sm text-sky-300" />
-        Buffering
+        緩衝中
       </div>
 
       <div
@@ -156,15 +156,15 @@ onMounted(() => {
 
     <div v-if="state.stats" class="grid gap-3 sm:grid-cols-3">
       <div class="rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-4 py-3">
-        <div class="text-xs uppercase tracking-[0.18em] text-[var(--app-muted)]">Startup</div>
+        <div class="text-xs uppercase tracking-[0.18em] text-[var(--app-muted)]">啟動時間</div>
         <div class="mt-1 text-lg font-semibold text-[var(--app-fg-strong)]">{{ state.stats.startupTimeMs }}ms</div>
       </div>
       <div class="rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-4 py-3">
-        <div class="text-xs uppercase tracking-[0.18em] text-[var(--app-muted)]">Reconnects</div>
+        <div class="text-xs uppercase tracking-[0.18em] text-[var(--app-muted)]">重連次數</div>
         <div class="mt-1 text-lg font-semibold text-[var(--app-fg-strong)]">{{ state.stats.reconnectCount }}</div>
       </div>
       <div class="rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-4 py-3">
-        <div class="text-xs uppercase tracking-[0.18em] text-[var(--app-muted)]">Buffers</div>
+        <div class="text-xs uppercase tracking-[0.18em] text-[var(--app-muted)]">緩衝次數</div>
         <div class="mt-1 text-lg font-semibold text-[var(--app-fg-strong)]">{{ state.stats.bufferCount }}</div>
       </div>
     </div>

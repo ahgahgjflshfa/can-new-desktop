@@ -29,11 +29,10 @@ function applyStreamUrl() {
   <div class="min-h-full px-6 py-6 md:px-8 md:py-8">
     <div class="mx-auto flex min-h-full max-w-6xl flex-col justify-center gap-6">
       <div class="space-y-2 text-center">
-        <p class="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--app-muted)]">Internal Test Surface</p>
-        <h1 class="text-3xl font-bold text-[var(--app-fg-strong)]">Stream Test</h1>
+        <p class="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--app-muted)]">內部測試頁面</p>
+        <h1 class="text-3xl font-bold text-[var(--app-fg-strong)]">串流測試</h1>
         <p class="mx-auto max-w-2xl text-sm leading-relaxed text-[var(--app-muted)]">
-          Use this tab to validate HLS playback, state transitions, retry behavior, and control wiring before placing
-          the player into the production flow.
+          可在此頁籤驗證 HLS 播放、狀態切換、重試行為與控制邏輯，再整合進正式流程。
         </p>
       </div>
 
@@ -43,7 +42,7 @@ function applyStreamUrl() {
         <div class="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-end">
           <label class="block">
             <span class="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-[var(--app-muted)]"
-              >HLS URL</span
+              >HLS 位址</span
             >
             <input
               v-model="streamUrlInput"
@@ -61,19 +60,19 @@ function applyStreamUrl() {
             @click="applyStreamUrl"
           >
             <span class="i-mdi-play-circle-outline text-base" />
-            Load Stream
+            載入串流
           </button>
         </div>
 
         <div class="mt-3 flex flex-wrap items-center gap-2 text-xs text-[var(--app-muted)]">
           <span class="rounded-full border border-[var(--app-border)] bg-[var(--app-surface-2)] px-3 py-1"
-            >Source: HLS</span
+            >來源：HLS</span
           >
           <span class="rounded-full border border-[var(--app-border)] bg-[var(--app-surface-2)] px-3 py-1"
-            >Centered sandbox</span
+            >置中測試區</span
           >
           <span class="rounded-full border border-[var(--app-border)] bg-[var(--app-surface-2)] px-3 py-1">
-            No production placement yet
+            尚未放入正式介面
           </span>
         </div>
       </section>
@@ -82,8 +81,8 @@ function applyStreamUrl() {
         <ManagedStreamPlayer
           :key="playerKey"
           :stream-config="activeConfig"
-          title="Camera Playback Sandbox"
-          source-label="HLS Verification"
+          title="攝影機播放測試"
+          source-label="HLS 驗證"
           :autoplay="true"
         />
       </div>

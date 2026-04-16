@@ -34,12 +34,12 @@ const exportError = ref<string | null>(null)
 const isExportingLogs = ref(false)
 
 const intervalOptions = [
-  { value: 5, label: '5 seconds' },
-  { value: 10, label: '10 seconds' },
-  { value: 30, label: '30 seconds' },
-  { value: 60, label: '1 minute' },
-  { value: 120, label: '2 minutes' },
-  { value: 300, label: '5 minutes' },
+  { value: 5, label: '5 秒' },
+  { value: 10, label: '10 秒' },
+  { value: 30, label: '30 秒' },
+  { value: 60, label: '1 分鐘' },
+  { value: 120, label: '2 分鐘' },
+  { value: 300, label: '5 分鐘' },
 ]
 
 function handleIntervalChange(event: Event) {
@@ -70,8 +70,8 @@ async function handleExportLogs() {
 <template>
   <div class="mx-auto max-w-4xl px-6 py-6 md:px-8 md:py-8">
     <div class="mb-8">
-      <h1 class="text-3xl font-bold tracking-tight text-[var(--app-fg-strong)]">Settings</h1>
-      <p class="mt-1 text-sm text-[var(--app-muted)]">Control notifications, window behavior, and the app theme.</p>
+      <h1 class="text-3xl font-bold tracking-tight text-[var(--app-fg-strong)]">設定</h1>
+      <p class="mt-1 text-sm text-[var(--app-muted)]">管理通知、視窗行為與應用程式主題。</p>
     </div>
 
     <div class="space-y-6">
@@ -81,14 +81,14 @@ async function handleExportLogs() {
           <span
             class="i-mdi-bell-ring inline-flex shrink-0 text-[1.2rem] leading-none font-normal text-[var(--app-primary-strong)]"
           />
-          Notifications
+          通知
         </h2>
 
         <div class="space-y-4">
           <div class="flex items-center justify-between py-2">
             <div class="flex flex-col">
-              <label for="polling-toggle" class="text-base font-medium text-[var(--app-fg)]">Enable polling</label>
-              <span class="text-sm text-[var(--app-muted)]">Automatically check for new alerts from the server</span>
+              <label for="polling-toggle" class="text-base font-medium text-[var(--app-fg)]">啟用輪詢</label>
+              <span class="text-sm text-[var(--app-muted)]">自動向伺服器檢查是否有新的警示</span>
             </div>
 
             <label class="relative inline-flex items-center cursor-pointer">
@@ -101,8 +101,8 @@ async function handleExportLogs() {
 
           <div class="flex items-center justify-between py-2">
             <div class="flex flex-col">
-              <span class="text-base font-medium text-[var(--app-fg)]">Polling interval</span>
-              <span class="text-sm text-[var(--app-muted)]">How often to check for new alerts</span>
+              <span class="text-base font-medium text-[var(--app-fg)]">輪詢間隔</span>
+              <span class="text-sm text-[var(--app-muted)]">檢查新警示的頻率</span>
             </div>
 
             <select
@@ -119,9 +119,9 @@ async function handleExportLogs() {
 
           <div v-if="notificationStore.isPolling" class="flex items-center gap-2 text-sm text-[var(--app-muted)] pt-2">
             <span class="w-2 h-2 rounded-full bg-[var(--app-success)] animate-pulse" />
-            <span>Polling active</span>
+            <span>輪詢中</span>
             <span class="text-[var(--app-muted-2)]">•</span>
-            <span>{{ notificationStore.pollingStats.pollCount }} polls completed</span>
+            <span>已完成 {{ notificationStore.pollingStats.pollCount }} 次輪詢</span>
           </div>
 
           <div
@@ -140,17 +140,13 @@ async function handleExportLogs() {
           <span
             class="i-mdi-window-maximize inline-flex shrink-0 text-[1.2rem] leading-none font-normal text-[var(--app-primary-strong)]"
           />
-          Window Behavior
+          視窗行為
         </h2>
 
         <div class="flex items-center justify-between py-2">
           <div class="flex flex-col">
-            <label for="minimize-toggle" class="text-base font-medium text-[var(--app-fg)]"
-              >Minimize to tray on close</label
-            >
-            <span class="text-sm text-[var(--app-muted)]"
-              >Keep the app running in the tray when you close the window</span
-            >
+            <label for="minimize-toggle" class="text-base font-medium text-[var(--app-fg)]">關閉時縮小到系統匣</label>
+            <span class="text-sm text-[var(--app-muted)]">關閉視窗後仍讓應用程式在系統匣中持續執行</span>
           </div>
 
           <label class="relative inline-flex items-center cursor-pointer">
@@ -168,15 +164,13 @@ async function handleExportLogs() {
           <span
             class="i-mdi-palette inline-flex shrink-0 text-[1.2rem] leading-none font-normal text-[var(--app-primary-strong)]"
           />
-          Appearance
+          外觀
         </h2>
 
         <div class="flex items-center justify-between gap-6 py-2">
           <div class="flex flex-col">
-            <span class="text-base font-medium text-[var(--app-fg)]">Theme</span>
-            <span class="text-sm text-[var(--app-muted)]"
-              >Choose a light or dark look, or follow the system setting</span
-            >
+            <span class="text-base font-medium text-[var(--app-fg)]">主題</span>
+            <span class="text-sm text-[var(--app-muted)]">可選擇淺色、深色，或跟隨系統設定</span>
           </div>
 
           <div class="shrink-0 inline-flex rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-2)] p-1">
@@ -188,12 +182,12 @@ async function handleExportLogs() {
                   ? 'bg-[var(--app-surface-2)] text-[var(--app-fg)]'
                   : 'text-[var(--app-muted)] hover:bg-[var(--app-hover)] hover:text-[var(--app-fg)]'
               "
-              aria-label="Use system theme"
+              aria-label="使用系統主題"
               :aria-pressed="themePreference === 'system'"
               @click="themePreference = 'system'"
             >
               <span class="i-mdi-monitor text-base" />
-              System
+              系統
             </button>
 
             <button
@@ -204,12 +198,12 @@ async function handleExportLogs() {
                   ? 'bg-[var(--app-surface-2)] text-[var(--app-fg)]'
                   : 'text-[var(--app-muted)] hover:bg-[var(--app-hover)] hover:text-[var(--app-fg)]'
               "
-              aria-label="Use light theme"
+              aria-label="使用淺色主題"
               :aria-pressed="themePreference === 'light'"
               @click="themePreference = 'light'"
             >
               <span class="i-mdi-white-balance-sunny text-base" />
-              Light
+              淺色
             </button>
 
             <button
@@ -220,12 +214,12 @@ async function handleExportLogs() {
                   ? 'bg-[var(--app-surface-2)] text-[var(--app-fg)]'
                   : 'text-[var(--app-muted)] hover:bg-[var(--app-hover)] hover:text-[var(--app-fg)]'
               "
-              aria-label="Use dark theme"
+              aria-label="使用深色主題"
               :aria-pressed="themePreference === 'dark'"
               @click="themePreference = 'dark'"
             >
               <span class="i-mdi-weather-night text-base" />
-              Dark
+              深色
             </button>
           </div>
         </div>
@@ -236,18 +230,16 @@ async function handleExportLogs() {
           <span
             class="i-mdi-file-document-outline inline-flex shrink-0 text-[1.2rem] leading-none font-normal text-[var(--app-primary-strong)]"
           />
-          Diagnostics
+          診斷資訊
         </h2>
 
         <div class="flex items-center justify-between gap-6 py-2">
           <div class="flex flex-col">
-            <span class="text-base font-medium text-[var(--app-fg)]">Application logs</span>
-            <span class="text-sm text-[var(--app-muted)]"
-              >Export recorded auth, notification, popup, and settings events.</span
-            >
-            <span class="mt-1 text-xs text-[var(--app-muted-2)]">{{ logEntryCount }} log entries available</span>
+            <span class="text-base font-medium text-[var(--app-fg)]">應用程式紀錄</span>
+            <span class="text-sm text-[var(--app-muted)]">匯出已記錄的登入、通知、彈窗與設定事件。</span>
+            <span class="mt-1 text-xs text-[var(--app-muted-2)]">目前有 {{ logEntryCount }} 筆紀錄可匯出</span>
             <span v-if="exportPath" class="mt-2 text-xs text-[var(--app-muted)] break-all"
-              >Last export: {{ exportPath }}</span
+              >上次匯出：{{ exportPath }}</span
             >
             <span v-if="exportError" class="mt-2 text-xs text-[var(--app-danger)]">{{ exportError }}</span>
           </div>
@@ -258,7 +250,7 @@ async function handleExportLogs() {
             :disabled="isExportingLogs"
             @click="handleExportLogs"
           >
-            {{ isExportingLogs ? 'Exporting…' : 'Export logs' }}
+            {{ isExportingLogs ? '匯出中…' : '匯出紀錄' }}
           </button>
         </div>
       </div>

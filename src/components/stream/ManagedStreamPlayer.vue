@@ -14,8 +14,8 @@ const props = withDefaults(
     disposeOnUnmount?: boolean
   }>(),
   {
-    title: 'Camera Stream',
-    sourceLabel: 'HLS Source',
+    title: '攝影機串流',
+    sourceLabel: 'HLS 來源',
     autoplay: false,
     disposeOnUnmount: true,
   }

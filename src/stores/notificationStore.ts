@@ -434,7 +434,7 @@ export const useNotificationStore = defineStore('notifications', {
     async replyTaskById(notificationId: string) {
       const taskId = this.getTaskId(notificationId)
       if (taskId === null) {
-        this.taskActionError = 'Invalid task id'
+        this.taskActionError = '任務編號無效'
         return
       }
 
@@ -461,7 +461,7 @@ export const useNotificationStore = defineStore('notifications', {
     async completeTaskById(notificationId: string, result: CompletionResult) {
       const taskId = this.getTaskId(notificationId)
       if (taskId === null) {
-        this.taskActionError = 'Invalid task id'
+        this.taskActionError = '任務編號無效'
         return
       }
 

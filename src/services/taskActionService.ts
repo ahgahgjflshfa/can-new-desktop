@@ -33,7 +33,7 @@ function getTokenFromStorage(): string | null {
 function getRequiredToken(): string {
   const token = getApiAuthToken() ?? getTokenFromStorage()
   if (!token) {
-    throw new Error('Missing authentication token')
+    throw new Error('缺少登入驗證資訊，請重新登入')
   }
   return token
 }

@@ -19,14 +19,14 @@ async function submitLogin() {
   formError.value = null
 
   if (!canSubmit.value) {
-    formError.value = 'Please enter account and password.'
+    formError.value = '請輸入帳號與密碼。'
     return
   }
 
   try {
     await authStore.login(form.account.trim(), form.password)
   } catch {
-    formError.value = authStore.lastError ?? 'Unable to login.'
+    formError.value = authStore.lastError ?? '登入失敗，請稍後再試。'
   }
 }
 </script>
@@ -47,12 +47,12 @@ async function submitLogin() {
           </div>
 
           <h1 class="text-[1.55rem] font-black tracking-tight text-[#1d1b20] sm:text-[1.8rem]">車站服務系統後台</h1>
-          <p class="mt-1 text-[0.88rem] font-semibold text-[#625b71] sm:text-[1.02rem]">Station Service System Login</p>
+          <p class="mt-1 text-[0.88rem] font-semibold text-[#625b71] sm:text-[1.02rem]">車站服務系統登入</p>
         </div>
 
         <form class="flex flex-1 flex-col gap-3.5" @submit.prevent="submitLogin">
           <label class="block">
-            <span class="mb-1.5 block text-xs font-semibold tracking-wide text-[#625b71]">帳號 (Account)</span>
+            <span class="mb-1.5 block text-xs font-semibold tracking-wide text-[#625b71]">帳號</span>
             <input
               id="account"
               v-model="form.account"
@@ -64,7 +64,7 @@ async function submitLogin() {
           </label>
 
           <label class="block">
-            <span class="mb-1.5 block text-xs font-semibold tracking-wide text-[#625b71]">密碼 (Password)</span>
+            <span class="mb-1.5 block text-xs font-semibold tracking-wide text-[#625b71]">密碼</span>
             <div class="relative">
               <input
                 id="password"
@@ -76,7 +76,7 @@ async function submitLogin() {
               />
 
               <button
-                :aria-label="showPassword ? 'Hide password' : 'Show password'"
+                :aria-label="showPassword ? '隱藏密碼' : '顯示密碼'"
                 class="absolute inset-y-0 right-0 flex w-12 items-center justify-center rounded-r-[0.95rem] text-[#625b71] transition-colors hover:text-[#6750a4] focus:outline-none"
                 type="button"
                 @click="showPassword = !showPassword"
