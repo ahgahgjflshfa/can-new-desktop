@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
-const API_BASE_URL: &str = "http://localhost:9090";
+const API_BASE_URL: &str = "https://www-u.tymetro.com.tw/station_services/api";
 
 #[derive(Deserialize)]
 pub(crate) struct ApiEnvelope<T> {
