@@ -33,7 +33,7 @@ pub async fn show_alert_popup(
             .title("Emergency Alert")
             .inner_size(POPUP_WIDTH, POPUP_HEIGHT)
             .resizable(false)
-            .decorations(false)
+            .decorations(true)
             .always_on_top(true)
             .center()
             .focused(true)

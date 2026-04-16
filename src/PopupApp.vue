@@ -132,12 +132,6 @@ onUnmounted(() => {
     class="h-screen w-screen flex flex-col overflow-hidden select-none"
     :class="currentPriorityConfig.bgClass"
   >
-    <!-- Draggable title bar -->
-    <div data-tauri-drag-region class="shrink-0 h-8 flex items-center justify-between px-3 bg-black/20 cursor-move">
-      <span class="text-xs font-semibold text-white/90 uppercase tracking-wider"> Emergency Alert </span>
-      <span class="text-xs text-white/70"> {{ currentNotification.unreadCount }} pending </span>
-    </div>
-
     <!-- Content -->
     <div class="flex-1 p-4 overflow-y-auto">
       <div class="flex items-start gap-3">
@@ -169,6 +163,10 @@ onUnmounted(() => {
           <div class="mt-3 text-xs text-white/70">
             <span class="i-mdi-clock-outline mr-1" />
             {{ formattedTime }}
+          </div>
+
+          <div class="mt-2 text-xs font-medium uppercase tracking-[0.16em] text-white/70">
+            {{ currentNotification.unreadCount }} pending
           </div>
         </div>
       </div>
