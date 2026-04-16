@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import { replyTask } from '@/services/taskActionService'
+import { logAppEvent } from '@/services/appLogger'
 import type { NotificationPriority } from '@/types/notification'
 
 interface NotificationPayload {
@@ -59,6 +60,7 @@ const formattedTime = computed(() => {
 })
 
 async function openMainWindow() {
+  logAppEvent('info', 'popup', 'requested opening main window from popup')
   await invoke('show_emergency_window')
 }
 
@@ -77,6 +79,7 @@ async function acknowledgeCurrentAlert() {
 
   try {
     await replyTask(taskId)
+    logAppEvent('info', 'popup', 'popup acknowledge succeeded', { notificationId })
 
     await invoke('emit_dismiss_notification', {
       notificationId,
@@ -84,6 +87,7 @@ async function acknowledgeCurrentAlert() {
     })
   } catch (err) {
     acknowledgeError.value = err instanceof Error ? err.message : String(err)
+    logAppEvent('error', 'popup', 'popup acknowledge failed', err)
   } finally {
     isAcknowledging.value = false
   }
@@ -92,11 +96,13 @@ async function acknowledgeCurrentAlert() {
 onMounted(async () => {
   unlistenShow = await listen<NotificationPayload>('show-notification', event => {
     console.log('[Popup] Received show-notification event:', event.payload)
+    logAppEvent('info', 'popup', 'received show-notification event', event.payload)
     acknowledgeError.value = null
     currentNotification.value = event.payload
   })
 
   unlistenHide = await listen('hide-notification', () => {
+    logAppEvent('info', 'popup', 'received hide-notification event')
     currentNotification.value = null
   })
 
@@ -105,9 +111,11 @@ onMounted(async () => {
     const pending = await invoke<NotificationPayload | null>('get_pending_notification')
     console.log('[Popup] get_pending_notification returned:', pending)
     if (pending) {
+      logAppEvent('info', 'popup', 'loaded pending notification on mount', { notificationId: pending.id })
       currentNotification.value = pending
     }
   } catch (err) {
+    logAppEvent('warn', 'popup', 'failed to get pending notification', err)
     console.warn('[Popup] Failed to get pending notification:', err)
   }
 })

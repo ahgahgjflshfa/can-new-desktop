@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import { logAppEvent } from '@/services/appLogger'
 import { setApiAuthTokenProvider } from '@/services/apiClient'
 import { loginWithPassword, logoutWithToken } from '@/services/authService'
 import type { AuthUser } from '@/types/auth'
@@ -34,14 +35,21 @@ export const useAuthStore = defineStore('auth', {
     async login(account: string, password: string) {
       this.isSubmitting = true
       this.lastError = null
+      logAppEvent('info', 'auth', 'login requested', { account })
 
       try {
         const result = await loginWithPassword(account, password)
         this.token = result.token
         this.user = result.user
         this.persistToStorage()
+        logAppEvent('info', 'auth', 'login succeeded', {
+          account,
+          stationId: result.user.stationId,
+          role: result.user.role,
+        })
       } catch (err) {
         this.lastError = err instanceof Error ? err.message : String(err)
+        logAppEvent('error', 'auth', 'login failed', err)
         throw err
       } finally {
         this.isSubmitting = false
@@ -57,8 +65,12 @@ export const useAuthStore = defineStore('auth', {
       try {
         await logoutWithToken(currentToken)
       } catch (err) {
+        logAppEvent('warn', 'auth', 'logout request failed', err)
         console.warn('logout request failed', err)
+        return
       }
+
+      logAppEvent('info', 'auth', 'logout completed')
     },
 
     clearSession() {
@@ -78,6 +90,7 @@ export const useAuthStore = defineStore('auth', {
       try {
         parsed = JSON.parse(raw)
       } catch (err) {
+        logAppEvent('warn', 'auth', 'failed to parse auth state', err)
         console.warn('failed to parse auth state', err)
         return
       }
@@ -107,6 +120,7 @@ export const useAuthStore = defineStore('auth', {
           } satisfies StoredAuthState)
         )
       } catch (err) {
+        logAppEvent('warn', 'auth', 'failed to persist auth state', err)
         console.warn('failed to persist auth state', err)
       }
     },
@@ -116,6 +130,7 @@ export const useAuthStore = defineStore('auth', {
       try {
         localStorage.removeItem(AUTH_STORAGE_KEY)
       } catch (err) {
+        logAppEvent('warn', 'auth', 'failed to clear auth state', err)
         console.warn('failed to clear auth state', err)
       }
     },

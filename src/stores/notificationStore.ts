@@ -5,6 +5,7 @@ import { completeTask, replyTask, type CompletionResult } from '@/services/taskA
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { isTauriRuntime } from '@/tauri/window'
+import { logAppEvent } from '@/services/appLogger'
 
 const NOTIFICATION_STORAGE_KEY = 'tauri-app:notifications'
 const SETTINGS_STORAGE_KEY = 'tauri-app:notification-settings'
@@ -273,6 +274,10 @@ export const useNotificationStore = defineStore('notifications', {
         await this.hidePopup()
         this.showInAppReminder(candidates.length)
         this.currentNotification = target
+        logAppEvent('info', 'notifications', 'showing in-app reminder instead of popup', {
+          count: candidates.length,
+          notificationId: target.id,
+        })
         return
       }
 
@@ -286,6 +291,7 @@ export const useNotificationStore = defineStore('notifications', {
 
       try {
         _dismissEventUnlisten = await listen<DismissPayload>('dismiss-notification', event => {
+          logAppEvent('info', 'notifications', 'received dismiss-notification event', event.payload)
           if (event.payload.dismissAll) {
             this.dismissAllNotificationsInternal()
           } else if (event.payload.notificationId) {
@@ -293,6 +299,7 @@ export const useNotificationStore = defineStore('notifications', {
           }
         })
       } catch (err) {
+        logAppEvent('warn', 'notifications', 'failed to set up dismiss listener', err)
         console.warn('Failed to setup dismiss listener:', err)
       }
     },
@@ -308,6 +315,7 @@ export const useNotificationStore = defineStore('notifications', {
         },
         onError: (error: Error) => {
           this.lastError = error.message
+          logAppEvent('error', 'notifications', 'notification polling error', error)
           console.error('Notification polling error:', error)
         },
         onPollComplete: (stats: PollingStats) => {
@@ -316,15 +324,23 @@ export const useNotificationStore = defineStore('notifications', {
       })
 
       this.isPolling = true
+      logAppEvent('info', 'notifications', 'started notification polling', {
+        intervalSeconds: this.pollingIntervalSeconds,
+      })
     },
 
     stopPolling() {
       const poller = getNotificationPoller()
       poller.stop()
       this.isPolling = false
+      logAppEvent('info', 'notifications', 'stopped notification polling')
     },
 
     handleNewNotifications(newNotifications: EmergencyNotification[]) {
+      if (newNotifications.length > 0) {
+        logAppEvent('info', 'notifications', 'received notifications from poller', { count: newNotifications.length })
+      }
+
       for (const notification of newNotifications) {
         const existingIndex = this.notifications.findIndex(n => n.id === notification.id)
         if (existingIndex !== -1) {
@@ -347,6 +363,7 @@ export const useNotificationStore = defineStore('notifications', {
       }
 
       void this.runReminderCycle().catch(err => {
+        logAppEvent('warn', 'notifications', 'reminder cycle failed', err)
         console.warn('Reminder cycle failed:', err)
       })
 
@@ -363,6 +380,10 @@ export const useNotificationStore = defineStore('notifications', {
 
       if (isTauriRuntime()) {
         try {
+          logAppEvent('info', 'notifications', 'showing alert popup', {
+            notificationId: notification.id,
+            priority: notification.priority,
+          })
           await invoke('show_alert_popup', {
             notification: {
               id: notification.id,
@@ -375,6 +396,7 @@ export const useNotificationStore = defineStore('notifications', {
             },
           })
         } catch (err) {
+          logAppEvent('warn', 'notifications', 'failed to show alert popup', err)
           console.warn('Failed to show alert popup:', err)
         }
       }
@@ -427,8 +449,10 @@ export const useNotificationStore = defineStore('notifications', {
           this.setTaskStatus(notificationId, 'replied')
         }
         this.saveToStorage()
+        logAppEvent('info', 'notifications', 'task reply succeeded', { notificationId, status })
       } catch (err) {
         this.taskActionError = err instanceof Error ? err.message : String(err)
+        logAppEvent('error', 'notifications', 'task reply failed', err)
       } finally {
         this.isTaskActionPending = false
       }
@@ -448,8 +472,10 @@ export const useNotificationStore = defineStore('notifications', {
         await completeTask(taskId, result)
         this.setTaskStatus(notificationId, 'completed')
         this.dismissNotificationById(notificationId)
+        logAppEvent('info', 'notifications', 'task completion succeeded', { notificationId, result })
       } catch (err) {
         this.taskActionError = err instanceof Error ? err.message : String(err)
+        logAppEvent('error', 'notifications', 'task completion failed', err)
       } finally {
         this.isTaskActionPending = false
       }
@@ -470,6 +496,7 @@ export const useNotificationStore = defineStore('notifications', {
       if (notification) {
         notification.status = 'dismissed'
         notification.dismissedAt = new Date().toISOString()
+        logAppEvent('info', 'notifications', 'dismissed notification', { notificationId })
       }
 
       if (this.currentNotification?.id === notificationId) {
@@ -514,6 +541,7 @@ export const useNotificationStore = defineStore('notifications', {
         try {
           await invoke('hide_alert_popup')
         } catch (err) {
+          logAppEvent('warn', 'notifications', 'failed to hide alert popup', err)
           console.warn('Failed to hide alert popup:', err)
         }
       }
@@ -558,6 +586,7 @@ export const useNotificationStore = defineStore('notifications', {
         this.stopPolling()
       }
       this.saveSettings()
+      logAppEvent('info', 'notifications', 'updated polling enabled setting', { enabled })
     },
 
     setPollingInterval(seconds: number) {
@@ -568,6 +597,7 @@ export const useNotificationStore = defineStore('notifications', {
       poller.updateConfig({ intervalMs: this.pollingIntervalMs })
 
       this.saveSettings()
+      logAppEvent('info', 'notifications', 'updated polling interval', { seconds: clampedSeconds })
     },
 
     loadFromStorage() {
@@ -583,6 +613,7 @@ export const useNotificationStore = defineStore('notifications', {
               .filter((item): item is NotificationState => item !== null)
           }
         } catch (err) {
+          logAppEvent('warn', 'notifications', 'failed to parse stored notifications', err)
           console.warn('Failed to parse stored notifications:', err)
         }
       }
@@ -598,6 +629,7 @@ export const useNotificationStore = defineStore('notifications', {
             this.pollingIntervalMs = settings.pollingIntervalMs
           }
         } catch (err) {
+          logAppEvent('warn', 'notifications', 'failed to parse stored settings', err)
           console.warn('Failed to parse stored settings:', err)
         }
       }
@@ -609,6 +641,7 @@ export const useNotificationStore = defineStore('notifications', {
       try {
         localStorage.setItem(NOTIFICATION_STORAGE_KEY, JSON.stringify(this.notifications))
       } catch (err) {
+        logAppEvent('warn', 'notifications', 'failed to save notifications', err)
         console.warn('Failed to save notifications:', err)
       }
     },
@@ -625,6 +658,7 @@ export const useNotificationStore = defineStore('notifications', {
           })
         )
       } catch (err) {
+        logAppEvent('warn', 'notifications', 'failed to save notification settings', err)
         console.warn('Failed to save settings:', err)
       }
     },

@@ -1,6 +1,7 @@
 import { acceptHMRUpdate, defineStore } from 'pinia'
 
 import { invoke } from '@tauri-apps/api/core'
+import { logAppEvent } from '@/services/appLogger'
 
 import { hideCurrentWindow } from './tauri/window'
 
@@ -48,6 +49,7 @@ async function syncMinimizeToTraySettingToBackend(enabled: boolean): Promise<voi
     await invoke('set_minimize_to_tray_on_close', { enabled })
   } catch (err) {
     // Non-Tauri runtime or command not available.
+    logAppEvent('warn', 'settings', 'failed to sync minimize-to-tray setting to backend', err)
     console.warn('failed to sync minimize-to-tray setting to backend', err)
   }
 }
@@ -71,12 +73,17 @@ export const useStore = defineStore('main', {
       this.applyThemePreference()
       void syncMinimizeToTraySettingToBackend(this.minimizeToTrayOnClose)
       this.isInitialized = true
+      logAppEvent('info', 'app', 'application initialized', {
+        themePreference: this.themePreference,
+        minimizeToTrayOnClose: this.minimizeToTrayOnClose,
+      })
       console.log('app initialized!')
     },
 
     setMinimizeToTrayOnClose(enabled: boolean) {
       this.minimizeToTrayOnClose = enabled
       this.saveSettingsToStorage()
+      logAppEvent('info', 'settings', 'updated minimize-to-tray preference', { enabled })
       void syncMinimizeToTraySettingToBackend(enabled)
     },
 
@@ -84,6 +91,7 @@ export const useStore = defineStore('main', {
       this.themePreference = preference
       this.saveSettingsToStorage()
       this.applyThemePreference()
+      logAppEvent('info', 'settings', 'updated theme preference', { preference })
     },
 
     applyThemePreference() {
@@ -109,6 +117,7 @@ export const useStore = defineStore('main', {
       try {
         parsed = JSON.parse(raw)
       } catch (err) {
+        logAppEvent('warn', 'settings', 'failed to parse persisted settings', err)
         console.warn('failed to parse settings, ignoring', err)
         return
       }
@@ -143,6 +152,7 @@ export const useStore = defineStore('main', {
       try {
         localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(payload))
       } catch (err) {
+        logAppEvent('warn', 'settings', 'failed to save settings', err)
         console.warn('failed to save settings', err)
       }
     },
