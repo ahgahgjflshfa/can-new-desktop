@@ -1,8 +1,10 @@
 import { invoke } from '@tauri-apps/api/core'
 import { getApiAuthToken } from '@/services/apiClient'
+import { logAppEvent } from '@/services/appLogger'
 import type { EmergencyNotification, NotificationApiResponse, NotificationPriority } from '@/types/notification'
 
 export const OFFICIAL_SERVER_URL = 'https://www-u.tymetro.com.tw/station_services/api'
+const LOG_SOURCE = 'notification-data-source'
 
 type NotificationSourceMode = 'server' | 'mock'
 
@@ -49,16 +51,34 @@ function mapTaskToNotification(task: TaskItem): EmergencyNotification {
 
 function createServerNotificationDataSource(): NotificationDataSource {
   return {
-    async fetchNotifications(_serverUrl?: string, _lastSyncTime?: string) {
+    async fetchNotifications(serverUrl?: string, lastSyncTime?: string) {
       const token = getApiAuthToken()
       if (!token) {
+        logAppEvent('error', LOG_SOURCE, 'Cannot fetch notifications because auth token is missing')
         throw new Error('Missing authentication token')
       }
 
-      const tasks = await invoke<TaskItem[]>('fetch_tasks', { token })
-      return {
-        notifications: tasks.map(mapTaskToNotification),
-        serverTime: new Date().toISOString(),
+      logAppEvent('info', LOG_SOURCE, 'Fetching notifications from backend task command', {
+        serverUrl,
+        lastSyncTime,
+      })
+
+      try {
+        const tasks = await invoke<TaskItem[]>('fetch_tasks', { token })
+        const response = {
+          notifications: tasks.map(mapTaskToNotification),
+          serverTime: new Date().toISOString(),
+        }
+
+        logAppEvent('info', LOG_SOURCE, 'Fetched notifications from backend task command', {
+          taskCount: tasks.length,
+          serverTime: response.serverTime,
+        })
+
+        return response
+      } catch (error) {
+        logAppEvent('error', LOG_SOURCE, 'Failed to fetch notifications from backend task command', error)
+        throw error
       }
     },
   }
@@ -67,6 +87,7 @@ function createServerNotificationDataSource(): NotificationDataSource {
 function createMockNotificationDataSource(): NotificationDataSource {
   return {
     async fetchNotifications() {
+      logAppEvent('info', LOG_SOURCE, 'Returning mock notification payload')
       return {
         notifications: [],
         serverTime: new Date().toISOString(),
@@ -82,6 +103,7 @@ function getSourceMode(): NotificationSourceMode {
 }
 
 function createNotificationDataSource(mode: NotificationSourceMode): NotificationDataSource {
+  logAppEvent('info', LOG_SOURCE, 'Creating notification data source', { mode })
   if (mode === 'mock') {
     return createMockNotificationDataSource()
   }

@@ -1,8 +1,10 @@
 import { acceptHMRUpdate, defineStore } from 'pinia'
+import { logAppEvent } from '@/services/appLogger'
 import type { PlayerState } from '@/services/stream/playerCore'
 import type { StreamConfig } from '@/types/stream'
 
 const STREAM_STORAGE_KEY = 'tauri-app:stream'
+const LOG_SOURCE = 'stream-store'
 
 interface StoredStreamState {
   currentConfig: StreamConfig | null
@@ -78,6 +80,7 @@ export const useStreamStore = defineStore('stream', {
       try {
         parsed = JSON.parse(raw)
       } catch (err) {
+        logAppEvent('warn', LOG_SOURCE, 'Failed to parse persisted stream state', err)
         console.warn('failed to parse stream state', err)
         return
       }
@@ -120,6 +123,7 @@ export const useStreamStore = defineStore('stream', {
           } satisfies StoredStreamState)
         )
       } catch (err) {
+        logAppEvent('warn', LOG_SOURCE, 'Failed to persist stream state', err)
         console.warn('failed to persist stream state', err)
       }
     },

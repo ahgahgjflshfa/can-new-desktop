@@ -26,7 +26,17 @@ function toDetailString(details: unknown): string | undefined {
   }
   if (typeof details === 'string') return details
   try {
-    return JSON.stringify(details)
+    return JSON.stringify(details, (_key, value) => {
+      if (value instanceof Error) {
+        return {
+          name: value.name,
+          message: value.message,
+          stack: value.stack,
+        }
+      }
+
+      return value
+    })
   } catch {
     return String(details)
   }
@@ -34,6 +44,7 @@ function toDetailString(details: unknown): string | undefined {
 
 function loadEntries(): AppLogEntry[] {
   if (typeof localStorage === 'undefined') return []
+  if (typeof localStorage.getItem !== 'function') return []
 
   const raw = localStorage.getItem(APP_LOG_STORAGE_KEY)
   if (!raw) return []
@@ -50,6 +61,7 @@ function loadEntries(): AppLogEntry[] {
 
 function saveEntries(entries: AppLogEntry[]) {
   if (typeof localStorage === 'undefined') return
+  if (typeof localStorage.setItem !== 'function') return
 
   try {
     localStorage.setItem(APP_LOG_STORAGE_KEY, JSON.stringify(entries.slice(-MAX_LOG_ENTRIES)))

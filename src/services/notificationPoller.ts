@@ -1,5 +1,8 @@
 import type { EmergencyNotification, NotificationState } from '@/types/notification'
+import { logAppEvent } from '@/services/appLogger'
 import { fetchNotifications, OFFICIAL_SERVER_URL } from './notificationDataSource'
+
+const LOG_SOURCE = 'notification-poller'
 
 export interface NotificationPollerCallbacks {
   onNewNotifications: (notifications: EmergencyNotification[]) => void
@@ -51,11 +54,16 @@ class NotificationPoller {
 
   start(callbacks: NotificationPollerCallbacks): void {
     if (this.intervalId !== null) {
+      logAppEvent('warn', LOG_SOURCE, 'Restarting notification poller because it was already running')
       this.stop()
     }
 
     this.callbacks = callbacks
     this.isPolling = true
+    logAppEvent('info', LOG_SOURCE, 'Starting notification poller', {
+      intervalMs: this.config.intervalMs,
+      serverUrl: this.config.serverUrl,
+    })
     this.poll()
     this.intervalId = setInterval(() => this.poll(), this.config.intervalMs)
     this.updateNextPollTime()
@@ -68,6 +76,11 @@ class NotificationPoller {
     }
     this.isPolling = false
     this.stats.nextPollTime = null
+    logAppEvent('info', LOG_SOURCE, 'Stopped notification poller', {
+      pollCount: this.stats.pollCount,
+      successCount: this.stats.successCount,
+      errorCount: this.stats.errorCount,
+    })
   }
 
   isActive(): boolean {
@@ -85,12 +98,23 @@ class NotificationPoller {
   }
 
   async poll(): Promise<void> {
-    if (!this.callbacks) return
-    if (this.isPollInProgress) return
+    if (!this.callbacks) {
+      logAppEvent('warn', LOG_SOURCE, 'Skipped poll because callbacks are not registered')
+      return
+    }
+    if (this.isPollInProgress) {
+      logAppEvent('warn', LOG_SOURCE, 'Skipped poll because a previous poll is still in progress')
+      return
+    }
 
     this.isPollInProgress = true
 
     this.stats.pollCount++
+    logAppEvent('info', LOG_SOURCE, 'Running notification poll', {
+      pollCount: this.stats.pollCount,
+      lastSyncTime: this.lastSyncTime,
+      serverUrl: this.config.serverUrl,
+    })
 
     try {
       const response = await fetchNotifications(this.config.serverUrl, this.lastSyncTime ?? undefined)
@@ -101,6 +125,12 @@ class NotificationPoller {
       this.stats.isConnected = true
       this.stats.lastError = null
       this.updateNextPollTime()
+
+      logAppEvent('info', LOG_SOURCE, 'Notification poll succeeded', {
+        notificationCount: response.notifications.length,
+        serverTime: response.serverTime,
+        stats: this.getStats(),
+      })
 
       this.callbacks.onNewNotifications(response.notifications)
 
@@ -113,6 +143,11 @@ class NotificationPoller {
       this.stats.lastError = error instanceof Error ? error.message : String(error)
       this.stats.lastPollTime = new Date()
       this.updateNextPollTime()
+
+      logAppEvent('error', LOG_SOURCE, 'Notification poll failed', {
+        error,
+        stats: this.getStats(),
+      })
 
       if (this.callbacks.onError) {
         this.callbacks.onError(error instanceof Error ? error : new Error(String(error)))
@@ -135,6 +170,10 @@ class NotificationPoller {
     }
 
     this.config = { ...this.config, ...config }
+    logAppEvent('info', LOG_SOURCE, 'Updated notification poller config', {
+      config: this.config,
+      wasPolling,
+    })
 
     if (wasPolling && oldCallbacks) {
       this.start(oldCallbacks)
