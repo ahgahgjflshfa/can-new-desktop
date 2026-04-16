@@ -39,8 +39,8 @@ describe('StreamPlayer', () => {
       },
     })
 
-    expect(wrapper.text()).toContain('Playback interrupted')
-    expect(wrapper.text()).toContain('Retry Stream')
+    expect(wrapper.text()).toContain('播放已中斷')
+    expect(wrapper.text()).toContain('重新嘗試串流')
   })
 
   test('shows compact buffering during playback without blocking overlay text', () => {
@@ -53,8 +53,8 @@ describe('StreamPlayer', () => {
       },
     })
 
-    expect(wrapper.text()).toContain('Buffering')
-    expect(wrapper.text()).not.toContain('Loading video')
+    expect(wrapper.text()).toContain('緩衝中')
+    expect(wrapper.text()).not.toContain('正在載入影片')
   })
 
   test('shows a resume overlay when paused', () => {
@@ -67,7 +67,7 @@ describe('StreamPlayer', () => {
       },
     })
 
-    expect(wrapper.text()).toContain('Paused')
-    expect(wrapper.text()).toContain('Resume')
+    expect(wrapper.text()).toContain('已暫停')
+    expect(wrapper.text()).toContain('繼續播放')
   })
 })

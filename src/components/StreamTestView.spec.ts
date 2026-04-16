@@ -14,7 +14,7 @@ describe('StreamTestView', () => {
       },
     })
 
-    expect(wrapper.text()).toContain('Stream Test')
+    expect(wrapper.text()).toContain('串流測試')
     expect(wrapper.find('input[type="url"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="managed-player"]').exists()).toBe(true)
   })

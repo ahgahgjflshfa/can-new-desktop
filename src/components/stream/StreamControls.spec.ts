@@ -10,7 +10,7 @@ describe('StreamControls', () => {
       },
     })
 
-    expect(wrapper.findAll('button')[0]?.text()).toContain('Pause')
+    expect(wrapper.findAll('button')[0]?.text()).toContain('暫停')
   })
 
   test('keeps play available when paused', () => {
@@ -20,6 +20,6 @@ describe('StreamControls', () => {
       },
     })
 
-    expect(wrapper.findAll('button')[0]?.text()).toContain('Play')
+    expect(wrapper.findAll('button')[0]?.text()).toContain('播放')
   })
 })
