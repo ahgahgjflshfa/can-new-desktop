@@ -7,6 +7,7 @@ mod auth_commands;
 mod constants;
 mod device_id;
 mod ipc_types;
+mod log_commands;
 mod popup_commands;
 mod state;
 mod task_commands;
@@ -17,6 +18,7 @@ use state::{MinimizeToTrayState, PendingNotificationState};
 
 pub use auth_commands::{auth_login, auth_logout};
 pub use device_id::get_or_create_device_id;
+pub use log_commands::export_app_logs;
 pub use popup_commands::{
     emit_dismiss_notification, get_pending_notification, hide_alert_popup, show_alert_popup,
 };
@@ -65,7 +67,8 @@ pub fn run() {
             show_alert_popup,
             hide_alert_popup,
             emit_dismiss_notification,
-            get_pending_notification
+            get_pending_notification,
+            export_app_logs
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
