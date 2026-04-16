@@ -62,7 +62,7 @@ export const useStore = defineStore('main', {
     debug: import.meta.env.MODE === 'development',
     version: versionString,
     isInitialized: false,
-    currentView: 'notifications' as 'home' | 'settings' | 'notifications' | 'stream-test',
+    currentView: 'notifications' as 'home' | 'settings' | 'notifications',
     minimizeToTrayOnClose: false,
     themePreference: 'system' as ThemePreference,
   }),

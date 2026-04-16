@@ -8,7 +8,6 @@ const authStore = useAuthStore()
 
 const navItems = [
   { id: 'notifications', label: '警示通知', shortLabel: '警示', icon: 'i-mdi-bell-ring-outline' },
-  { id: 'stream-test', label: '串流測試', shortLabel: '串流', icon: 'i-mdi-play-box-multiple-outline' },
   { id: 'settings', label: '設定', shortLabel: '設定', icon: 'i-mdi-cog-outline' },
 ] as const
 
