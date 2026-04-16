@@ -9,6 +9,7 @@ mod device_id;
 mod ipc_types;
 mod log_commands;
 mod popup_commands;
+mod runtime_log;
 mod state;
 mod task_commands;
 mod window_controls;

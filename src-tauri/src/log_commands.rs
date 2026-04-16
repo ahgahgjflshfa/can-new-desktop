@@ -6,14 +6,28 @@ use std::{
 
 use tauri::Manager;
 
+use crate::runtime_log;
+
+const LOG_SOURCE: &str = "log-export";
+
 #[tauri::command]
 pub fn export_app_logs(app: tauri::AppHandle, contents: String) -> Result<String, String> {
+    runtime_log::info(
+        LOG_SOURCE,
+        format!("Exporting application logs ({} bytes)", contents.len()).as_str(),
+    );
     let mut output_dir = match app.path().download_dir() {
         Ok(path) => path,
         Err(_) => app.path().app_data_dir().map_err(|e| e.to_string())?,
     };
 
-    fs::create_dir_all(&output_dir).map_err(|e| e.to_string())?;
+    fs::create_dir_all(&output_dir).map_err(|e| {
+        runtime_log::error(
+            LOG_SOURCE,
+            format!("Failed creating log export directory: {}", e).as_str(),
+        );
+        e.to_string()
+    })?;
 
     let unix_timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -24,9 +38,20 @@ pub fn export_app_logs(app: tauri::AppHandle, contents: String) -> Result<String
 
     write_log_file(&output_dir, contents)?;
 
+    runtime_log::info(
+        LOG_SOURCE,
+        format!("Exported application logs to {}", output_dir.display()).as_str(),
+    );
+
     Ok(output_dir.to_string_lossy().into_owned())
 }
 
 fn write_log_file(path: &PathBuf, contents: String) -> Result<(), String> {
-    fs::write(path, contents.as_bytes()).map_err(|e| e.to_string())
+    fs::write(path, contents.as_bytes()).map_err(|e| {
+        runtime_log::error(
+            LOG_SOURCE,
+            format!("Failed writing log export file: {}", e).as_str(),
+        );
+        e.to_string()
+    })
 }

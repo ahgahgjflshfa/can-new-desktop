@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::api_client::{build_api_client, build_api_url, ApiEnvelope};
+use crate::runtime_log;
+
+const LOG_SOURCE: &str = "auth";
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -54,6 +57,14 @@ struct AuthLoginRequestBody<'a> {
 
 #[tauri::command]
 pub async fn auth_login(payload: AuthLoginRequest) -> Result<AuthLoginResponse, String> {
+    runtime_log::info(
+        LOG_SOURCE,
+        format!(
+            "Starting login request for account '{}' with device_type '{}'",
+            payload.account, payload.device_type
+        )
+        .as_str(),
+    );
     let client = build_api_client()?;
     let body = AuthLoginRequestBody {
         account: payload.account.as_str(),
@@ -68,23 +79,50 @@ pub async fn auth_login(payload: AuthLoginRequest) -> Result<AuthLoginResponse, 
         .json(&body)
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            runtime_log::error(
+                LOG_SOURCE,
+                format!("Login HTTP request failed: {}", e).as_str(),
+            );
+            e.to_string()
+        })?;
 
     let status_code = response.status();
     let envelope = response
         .json::<ApiEnvelope<LoginApiData>>()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            runtime_log::error(
+                LOG_SOURCE,
+                format!("Failed to decode login response: {}", e).as_str(),
+            );
+            e.to_string()
+        })?;
 
     if !status_code.is_success() || envelope.status != "success" {
-        return Err(envelope
+        let message = envelope
             .message
-            .unwrap_or_else(|| format!("Login failed with status {}", status_code)));
+            .unwrap_or_else(|| format!("Login failed with status {}", status_code));
+        runtime_log::warn(
+            LOG_SOURCE,
+            format!("Login rejected with status {}: {}", status_code, message).as_str(),
+        );
+        return Err(message);
     }
 
-    let data = envelope
-        .data
-        .ok_or_else(|| "Login response missing data".to_string())?;
+    let data = envelope.data.ok_or_else(|| {
+        runtime_log::error(LOG_SOURCE, "Login response was successful but missing data");
+        "Login response missing data".to_string()
+    })?;
+
+    runtime_log::info(
+        LOG_SOURCE,
+        format!(
+            "Login succeeded for account '{}' (station_id='{}', role='{}')",
+            payload.account, data.user.station_id, data.user.role
+        )
+        .as_str(),
+    );
 
     Ok(AuthLoginResponse {
         token: data.token,
@@ -99,6 +137,7 @@ pub async fn auth_login(payload: AuthLoginRequest) -> Result<AuthLoginResponse, 
 
 #[tauri::command]
 pub async fn auth_logout(token: String) -> Result<(), String> {
+    runtime_log::info(LOG_SOURCE, "Starting logout request");
     let client = build_api_client()?;
     let response = client
         .post(build_api_url("/auth/logout"))
@@ -106,19 +145,38 @@ pub async fn auth_logout(token: String) -> Result<(), String> {
         .json(&serde_json::json!({}))
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            runtime_log::error(
+                LOG_SOURCE,
+                format!("Logout HTTP request failed: {}", e).as_str(),
+            );
+            e.to_string()
+        })?;
 
     let status_code = response.status();
     let envelope = response
         .json::<ApiEnvelope<serde_json::Value>>()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            runtime_log::error(
+                LOG_SOURCE,
+                format!("Failed to decode logout response: {}", e).as_str(),
+            );
+            e.to_string()
+        })?;
 
     if !status_code.is_success() || envelope.status != "success" {
-        return Err(envelope
+        let message = envelope
             .message
-            .unwrap_or_else(|| format!("Logout failed with status {}", status_code)));
+            .unwrap_or_else(|| format!("Logout failed with status {}", status_code));
+        runtime_log::warn(
+            LOG_SOURCE,
+            format!("Logout rejected with status {}: {}", status_code, message).as_str(),
+        );
+        return Err(message);
     }
+
+    runtime_log::info(LOG_SOURCE, "Logout succeeded");
 
     Ok(())
 }
