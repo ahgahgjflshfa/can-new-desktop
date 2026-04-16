@@ -1,0 +1,50 @@
+name: Windows Bundle
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: windows-bundle-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-windows:
+    name: Build Windows installer artifacts
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v6.0.1
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4.2.0
+        with:
+          version: 10
+
+      - name: Use Node.js
+        uses: actions/setup-node@v6.2.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Windows bundles
+        run: pnpm tauri build --bundles nsis,msi
+
+      - name: Upload MSI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tauri-windows-msi
+          path: src-tauri/target/release/bundle/msi/*.msi
+          if-no-files-found: error
+
+      - name: Upload NSIS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tauri-windows-nsis
+          path: src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
