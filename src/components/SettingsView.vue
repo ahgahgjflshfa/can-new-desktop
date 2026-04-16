@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { exportAppLogs } from '@/services/logExportService'
+import { getAppLogs, logAppEvent } from '@/services/appLogger'
 import { useStore } from '@/store'
 import { useNotificationStore } from '@/stores/notificationStore'
 
@@ -26,6 +28,10 @@ const pollingEnabled = computed({
 })
 
 const pollingInterval = ref(notificationStore.pollingIntervalSeconds)
+const logEntryCount = ref(getAppLogs().length)
+const exportPath = ref<string | null>(null)
+const exportError = ref<string | null>(null)
+const isExportingLogs = ref(false)
 
 const intervalOptions = [
   { value: 5, label: '5 seconds' },
@@ -41,6 +47,23 @@ function handleIntervalChange(event: Event) {
   const seconds = parseInt(target.value, 10)
   pollingInterval.value = seconds
   notificationStore.setPollingInterval(seconds)
+}
+
+async function handleExportLogs() {
+  if (isExportingLogs.value) return
+
+  isExportingLogs.value = true
+  exportError.value = null
+
+  try {
+    exportPath.value = await exportAppLogs()
+    logEntryCount.value = getAppLogs().length
+  } catch (err) {
+    exportError.value = err instanceof Error ? err.message : String(err)
+    logAppEvent('error', 'settings', 'failed to export application logs', err)
+  } finally {
+    isExportingLogs.value = false
+  }
 }
 </script>
 
@@ -205,6 +228,38 @@ function handleIntervalChange(event: Event) {
               Dark
             </button>
           </div>
+        </div>
+      </div>
+
+      <div class="rounded-[1.5rem] border border-[var(--app-border)] bg-[var(--app-surface)] p-6">
+        <h2 class="text-xl font-semibold mb-4 text-[var(--app-fg)] flex items-center gap-2">
+          <span
+            class="i-mdi-file-document-outline inline-flex shrink-0 text-[1.2rem] leading-none font-normal text-[var(--app-primary-strong)]"
+          />
+          Diagnostics
+        </h2>
+
+        <div class="flex items-center justify-between gap-6 py-2">
+          <div class="flex flex-col">
+            <span class="text-base font-medium text-[var(--app-fg)]">Application logs</span>
+            <span class="text-sm text-[var(--app-muted)]"
+              >Export recorded auth, notification, popup, and settings events.</span
+            >
+            <span class="mt-1 text-xs text-[var(--app-muted-2)]">{{ logEntryCount }} log entries available</span>
+            <span v-if="exportPath" class="mt-2 text-xs text-[var(--app-muted)] break-all"
+              >Last export: {{ exportPath }}</span
+            >
+            <span v-if="exportError" class="mt-2 text-xs text-[var(--app-danger)]">{{ exportError }}</span>
+          </div>
+
+          <button
+            type="button"
+            class="rounded-full bg-[var(--app-primary-strong)] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--app-primary)] disabled:cursor-not-allowed disabled:opacity-60"
+            :disabled="isExportingLogs"
+            @click="handleExportLogs"
+          >
+            {{ isExportingLogs ? 'Exporting…' : 'Export logs' }}
+          </button>
         </div>
       </div>
     </div>
