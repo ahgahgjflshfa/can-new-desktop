@@ -37,7 +37,7 @@ async function handleLogout() {
             <div
               class="flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--app-accent)] text-[var(--app-primary-strong)]"
             >
-              <div class="i-mdi-train-car-passenger text-[1.55rem]" />
+              <div class="i-mdi-subway-variant text-[1.55rem]" />
             </div>
             <div class="flex min-w-0 flex-1 items-center justify-between gap-3">
               <div class="min-w-0 self-center">
