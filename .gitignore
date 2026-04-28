@@ -25,3 +25,4 @@ dist-ssr
 LOCAL_NOTES.md
 .env
 target/
+/mise.toml
