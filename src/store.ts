@@ -7,43 +7,6 @@ import { hideCurrentWindow } from './tauri/window'
 
 const SETTINGS_STORAGE_KEY = 'tauri-app:settings'
 
-type ThemePreference = 'dark' | 'light' | 'system'
-type EffectiveTheme = 'dark' | 'light'
-
-let systemThemeMediaQuery: MediaQueryList | null = null
-let systemThemeListener: ((event: MediaQueryListEvent) => void) | null = null
-
-function getSystemPreferredTheme(): EffectiveTheme {
-  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return 'dark'
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-}
-
-function applyThemeToDocument(theme: EffectiveTheme) {
-  if (typeof document === 'undefined') return
-  document.documentElement.dataset.theme = theme
-}
-
-function setSystemThemeListenerEnabled(enabled: boolean, onChange: () => void) {
-  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
-
-  if (!systemThemeMediaQuery) {
-    systemThemeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
-  }
-
-  if (!enabled) {
-    if (systemThemeListener && systemThemeMediaQuery) {
-      systemThemeMediaQuery.removeEventListener('change', systemThemeListener)
-    }
-    systemThemeListener = null
-    return
-  }
-
-  if (systemThemeListener) return
-
-  systemThemeListener = () => onChange()
-  systemThemeMediaQuery.addEventListener('change', systemThemeListener)
-}
-
 async function syncMinimizeToTraySettingToBackend(enabled: boolean): Promise<void> {
   try {
     await invoke('set_minimize_to_tray_on_close', { enabled })
@@ -64,17 +27,14 @@ export const useStore = defineStore('main', {
     isInitialized: false,
     currentView: 'notifications' as 'home' | 'settings' | 'notifications',
     minimizeToTrayOnClose: false,
-    themePreference: 'system' as ThemePreference,
   }),
 
   actions: {
     initApp() {
       this.loadSettingsFromStorage()
-      this.applyThemePreference()
       void syncMinimizeToTraySettingToBackend(this.minimizeToTrayOnClose)
       this.isInitialized = true
       logAppEvent('info', 'app', 'application initialized', {
-        themePreference: this.themePreference,
         minimizeToTrayOnClose: this.minimizeToTrayOnClose,
       })
       console.log('app initialized!')
@@ -85,22 +45,6 @@ export const useStore = defineStore('main', {
       this.saveSettingsToStorage()
       logAppEvent('info', 'settings', 'updated minimize-to-tray preference', { enabled })
       void syncMinimizeToTraySettingToBackend(enabled)
-    },
-
-    setThemePreference(preference: ThemePreference) {
-      this.themePreference = preference
-      this.saveSettingsToStorage()
-      this.applyThemePreference()
-      logAppEvent('info', 'settings', 'updated theme preference', { preference })
-    },
-
-    applyThemePreference() {
-      const preference = this.themePreference
-      const effectiveTheme: EffectiveTheme =
-        preference === 'system' ? getSystemPreferredTheme() : preference === 'light' ? 'light' : 'dark'
-
-      applyThemeToDocument(effectiveTheme)
-      setSystemThemeListenerEnabled(preference === 'system', () => this.applyThemePreference())
     },
 
     async hideToTrayNow() {
@@ -129,10 +73,6 @@ export const useStore = defineStore('main', {
       if (typeof minimizeToTrayOnClose === 'boolean') {
         this.minimizeToTrayOnClose = minimizeToTrayOnClose
       }
-      const themePreference = record.themePreference
-      if (themePreference === 'dark' || themePreference === 'light' || themePreference === 'system') {
-        this.themePreference = themePreference
-      }
 
       // Backward compatibility (previous key).
       const minimizeOnClose = record.minimizeOnClose
@@ -146,7 +86,6 @@ export const useStore = defineStore('main', {
 
       const payload = {
         minimizeToTrayOnClose: this.minimizeToTrayOnClose,
-        themePreference: this.themePreference,
       }
 
       try {

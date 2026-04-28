@@ -13,15 +13,6 @@ const minimizeOnClose = computed({
   set: value => store.setMinimizeToTrayOnClose(value),
 })
 
-const themePreference = computed({
-  get: () => store.themePreference,
-  set: value => {
-    if (value === 'dark' || value === 'light' || value === 'system') {
-      store.setThemePreference(value)
-    }
-  },
-})
-
 const pollingEnabled = computed({
   get: () => notificationStore.pollingEnabled,
   set: value => notificationStore.setPollingEnabled(value),
@@ -71,7 +62,7 @@ async function handleExportLogs() {
   <div class="mx-auto max-w-4xl px-6 py-6 md:px-8 md:py-8">
     <div class="mb-8">
       <h1 class="text-3xl font-bold tracking-tight text-[var(--app-fg-strong)]">設定</h1>
-      <p class="mt-1 text-sm text-[var(--app-muted)]">管理通知、視窗行為與應用程式主題。</p>
+      <p class="mt-1 text-sm text-[var(--app-muted)]">管理通知、視窗行為與應用程式紀錄。</p>
     </div>
 
     <div class="space-y-6">
@@ -158,73 +149,6 @@ async function handleExportLogs() {
         </div>
       </div>
 
-      <!-- Section: Appearance -->
-      <div class="rounded-[1.5rem] border border-[var(--app-border)] bg-[var(--app-surface)] p-6">
-        <h2 class="text-xl font-semibold mb-4 text-[var(--app-fg)] flex items-center gap-2">
-          <span
-            class="i-mdi-palette inline-flex shrink-0 text-[1.2rem] leading-none font-normal text-[var(--app-primary-strong)]"
-          />
-          外觀
-        </h2>
-
-        <div class="flex items-center justify-between gap-6 py-2">
-          <div class="flex flex-col">
-            <span class="text-base font-medium text-[var(--app-fg)]">主題</span>
-            <span class="text-sm text-[var(--app-muted)]">可選擇淺色、深色，或跟隨系統設定</span>
-          </div>
-
-          <div class="shrink-0 inline-flex rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-2)] p-1">
-            <button
-              type="button"
-              class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
-              :class="
-                themePreference === 'system'
-                  ? 'bg-[var(--app-surface-2)] text-[var(--app-fg)]'
-                  : 'text-[var(--app-muted)] hover:bg-[var(--app-hover)] hover:text-[var(--app-fg)]'
-              "
-              aria-label="使用系統主題"
-              :aria-pressed="themePreference === 'system'"
-              @click="themePreference = 'system'"
-            >
-              <span class="i-mdi-monitor text-base" />
-              系統
-            </button>
-
-            <button
-              type="button"
-              class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
-              :class="
-                themePreference === 'light'
-                  ? 'bg-[var(--app-surface-2)] text-[var(--app-fg)]'
-                  : 'text-[var(--app-muted)] hover:bg-[var(--app-hover)] hover:text-[var(--app-fg)]'
-              "
-              aria-label="使用淺色主題"
-              :aria-pressed="themePreference === 'light'"
-              @click="themePreference = 'light'"
-            >
-              <span class="i-mdi-white-balance-sunny text-base" />
-              淺色
-            </button>
-
-            <button
-              type="button"
-              class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
-              :class="
-                themePreference === 'dark'
-                  ? 'bg-[var(--app-surface-2)] text-[var(--app-fg)]'
-                  : 'text-[var(--app-muted)] hover:bg-[var(--app-hover)] hover:text-[var(--app-fg)]'
-              "
-              aria-label="使用深色主題"
-              :aria-pressed="themePreference === 'dark'"
-              @click="themePreference = 'dark'"
-            >
-              <span class="i-mdi-weather-night text-base" />
-              深色
-            </button>
-          </div>
-        </div>
-      </div>
-
       <div class="rounded-[1.5rem] border border-[var(--app-border)] bg-[var(--app-surface)] p-6">
         <h2 class="text-xl font-semibold mb-4 text-[var(--app-fg)] flex items-center gap-2">
           <span
@@ -236,8 +160,6 @@ async function handleExportLogs() {
         <div class="flex items-center justify-between gap-6 py-2">
           <div class="flex flex-col">
             <span class="text-base font-medium text-[var(--app-fg)]">應用程式紀錄</span>
-            <span class="text-sm text-[var(--app-muted)]">匯出已記錄的登入、通知、彈窗與設定事件。</span>
-            <span class="mt-1 text-xs text-[var(--app-muted-2)]">目前有 {{ logEntryCount }} 筆紀錄可匯出</span>
             <span v-if="exportPath" class="mt-2 text-xs text-[var(--app-muted)] break-all"
               >上次匯出：{{ exportPath }}</span
             >
@@ -250,7 +172,7 @@ async function handleExportLogs() {
             :disabled="isExportingLogs"
             @click="handleExportLogs"
           >
-            {{ isExportingLogs ? '匯出中…' : '匯出紀錄' }}
+            {{ isExportingLogs ? 'Exporting…' : 'Export Log' }}
           </button>
         </div>
       </div>

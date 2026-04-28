@@ -18,7 +18,6 @@ const store = useStore(pinia)
 const authStore = useAuthStore(pinia)
 
 store.loadSettingsFromStorage()
-store.applyThemePreference()
 authStore.init()
 
 app.mount('#app')
