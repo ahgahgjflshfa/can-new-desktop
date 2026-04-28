@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "立馬幫幫忙",
-  "version": "2.9.3",
-  "identifier": "com.tauri-app.my",
+  "version": "1.0.0",
+  "identifier": "com.tymetro.my",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
