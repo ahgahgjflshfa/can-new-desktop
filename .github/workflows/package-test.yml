@@ -57,7 +57,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: package-${{ inputs.platform }}-${{ github.ref_name }}
+          name: package-${{ inputs.platform }}-${{ github.run_number }}
           path: |
             src-tauri/target/release/bundle/**/*.AppImage
             src-tauri/target/release/bundle/**/*.deb
