@@ -1,0 +1,68 @@
+name: Package Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: "Platform to build"
+        required: true
+        default: "windows"
+        type: choice
+        options:
+          - windows
+          - macos-arm64
+          - linux
+
+concurrency:
+  group: package-test-${{ github.ref }}-${{ inputs.platform }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    runs-on: ${{ 
+        inputs.platform == 'windows' && 'windows-latest' ||
+        inputs.platform == 'macos-arm64' && 'macos-latest' ||
+        'ubuntu-24.04'
+      }}
+
+    steps:
+      - uses: actions/checkout@v6.0.1
+
+      - name: Install pnpm + deps
+        uses: pnpm/action-setup@v4.2.0
+        with:
+          version: 10
+          run_install: true
+
+      - name: Use Node.js
+        uses: actions/setup-node@v6.2.0
+        with:
+          node-version: 24
+          cache: "pnpm"
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ inputs.platform == 'macos-arm64' && 'aarch64-apple-darwin' || '' }}
+
+      - name: Install Linux dependencies
+        if: inputs.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Build Tauri
+        run: pnpm tauri build ${{ inputs.platform == 'macos-arm64' && '--target aarch64-apple-darwin' || '' }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ inputs.platform }}-${{ github.ref_name }}
+          path: |
+            src-tauri/target/release/bundle/**/*.AppImage
+            src-tauri/target/release/bundle/**/*.deb
+            src-tauri/target/release/bundle/**/*.rpm
+            src-tauri/target/release/bundle/**/*.exe
+            src-tauri/target/release/bundle/**/*.msi
+            src-tauri/target/**/*.dmg
+          if-no-files-found: error
