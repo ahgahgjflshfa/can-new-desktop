@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { exportAppLogs } from '@/services/logExportService'
 import { getAppLogs, logAppEvent } from '@/services/appLogger'
+import { openCameraViewer } from '@/services/cameraViewerService'
 import { useStore } from '@/store'
 import { useNotificationStore } from '@/stores/notificationStore'
 
@@ -23,6 +24,13 @@ const logEntryCount = ref(getAppLogs().length)
 const exportPath = ref<string | null>(null)
 const exportError = ref<string | null>(null)
 const isExportingLogs = ref(false)
+const cameraViewerError = ref<string | null>(null)
+const isOpeningCameraViewer = ref(false)
+
+const cameraViewerUrl = computed({
+  get: () => store.cameraViewerUrl,
+  set: value => store.setCameraViewerUrl(value),
+})
 
 const intervalOptions = [
   { value: 5, label: '5 秒' },
@@ -54,6 +62,28 @@ async function handleExportLogs() {
     logAppEvent('error', 'settings', 'failed to export application logs', err)
   } finally {
     isExportingLogs.value = false
+  }
+}
+
+async function handleOpenCameraViewer() {
+  if (isOpeningCameraViewer.value) return
+
+  const url = cameraViewerUrl.value.trim()
+  if (!url) {
+    cameraViewerError.value = '請先輸入攝影機觀看頁面網址'
+    return
+  }
+
+  isOpeningCameraViewer.value = true
+  cameraViewerError.value = null
+
+  try {
+    await openCameraViewer(url)
+  } catch (err) {
+    cameraViewerError.value = err instanceof Error ? err.message : String(err)
+    logAppEvent('error', 'settings', 'failed to open camera viewer', err)
+  } finally {
+    isOpeningCameraViewer.value = false
   }
 }
 </script>
@@ -146,6 +176,49 @@ async function handleExportLogs() {
               class="w-11 h-6 bg-[var(--app-control-bg)] peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[var(--app-primary)] rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-[var(--app-control-knob)] after:border-[var(--app-border)] after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[var(--app-primary-strong)]"
             ></div>
           </label>
+        </div>
+      </div>
+
+      <div class="rounded-[1.5rem] border border-[var(--app-border)] bg-[var(--app-surface)] p-6">
+        <h2 class="text-xl font-semibold mb-4 text-[var(--app-fg)] flex items-center gap-2">
+          <span
+            class="i-mdi-cctv inline-flex shrink-0 text-[1.2rem] leading-none font-normal text-[var(--app-primary-strong)]"
+          />
+          攝影機觀看頁面
+        </h2>
+
+        <div class="space-y-4">
+          <div class="flex flex-col gap-2">
+            <label for="camera-viewer-url" class="text-base font-medium text-[var(--app-fg)]">觀看頁面網址</label>
+            <input
+              id="camera-viewer-url"
+              v-model="cameraViewerUrl"
+              type="url"
+              class="w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-2)] px-4 py-3 text-sm text-[var(--app-fg-strong)] outline-none transition-colors placeholder:text-[var(--app-muted-2)] focus:border-[var(--app-primary)]"
+              placeholder="https://vendor.example.com/viewer"
+              spellcheck="false"
+            />
+            <p class="text-sm text-[var(--app-muted)]">
+              輸入攝影機系統提供的完整觀看頁面網址。系統會優先在 app 內開啟獨立視窗，失敗時改用瀏覽器。
+            </p>
+          </div>
+
+          <div class="flex items-center justify-between gap-6 py-2">
+            <div class="flex flex-col">
+              <span class="text-base font-medium text-[var(--app-fg)]">開啟攝影機觀看頁面</span>
+              <span class="text-sm text-[var(--app-muted)]">重複點擊時會聚焦既有視窗，不會持續建立新視窗</span>
+              <span v-if="cameraViewerError" class="mt-2 text-xs text-[var(--app-danger)]">{{ cameraViewerError }}</span>
+            </div>
+
+            <button
+              type="button"
+              class="rounded-full bg-[var(--app-primary-strong)] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--app-primary)] disabled:cursor-not-allowed disabled:opacity-60"
+              :disabled="isOpeningCameraViewer || !cameraViewerUrl.trim()"
+              @click="handleOpenCameraViewer"
+            >
+              {{ isOpeningCameraViewer ? 'Opening…' : 'Open Viewer' }}
+            </button>
+          </div>
         </div>
       </div>
 

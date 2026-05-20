@@ -27,6 +27,7 @@ export const useStore = defineStore('main', {
     isInitialized: false,
     currentView: 'notifications' as 'home' | 'settings' | 'notifications',
     minimizeToTrayOnClose: false,
+    cameraViewerUrl: '',
   }),
 
   actions: {
@@ -45,6 +46,14 @@ export const useStore = defineStore('main', {
       this.saveSettingsToStorage()
       logAppEvent('info', 'settings', 'updated minimize-to-tray preference', { enabled })
       void syncMinimizeToTraySettingToBackend(enabled)
+    },
+
+    setCameraViewerUrl(url: string) {
+      this.cameraViewerUrl = url.trim()
+      this.saveSettingsToStorage()
+      logAppEvent('info', 'settings', 'updated camera viewer url', {
+        hasUrl: this.cameraViewerUrl.length > 0,
+      })
     },
 
     async hideToTrayNow() {
@@ -74,6 +83,11 @@ export const useStore = defineStore('main', {
         this.minimizeToTrayOnClose = minimizeToTrayOnClose
       }
 
+      const cameraViewerUrl = record.cameraViewerUrl
+      if (typeof cameraViewerUrl === 'string') {
+        this.cameraViewerUrl = cameraViewerUrl
+      }
+
       // Backward compatibility (previous key).
       const minimizeOnClose = record.minimizeOnClose
       if (typeof minimizeOnClose === 'boolean') {
@@ -86,6 +100,7 @@ export const useStore = defineStore('main', {
 
       const payload = {
         minimizeToTrayOnClose: this.minimizeToTrayOnClose,
+        cameraViewerUrl: this.cameraViewerUrl,
       }
 
       try {
@@ -99,7 +114,7 @@ export const useStore = defineStore('main', {
 
   getters: {
     isReady: state => {
-      return !state.isInitialized
+      return state.isInitialized
     },
   },
 })
