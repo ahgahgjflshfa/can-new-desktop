@@ -5,6 +5,7 @@ import type { EmergencyNotification, NotificationApiResponse, NotificationPriori
 
 export const OFFICIAL_SERVER_URL = 'https://www-u.tymetro.com.tw/station_services/api'
 const LOG_SOURCE = 'notification-data-source'
+const MISSING_TIMESTAMP_ISO = new Date(0).toISOString()
 
 type NotificationSourceMode = 'server' | 'mock'
 
@@ -26,7 +27,7 @@ interface TaskItem {
 
 function timestampToIso(value: number | null): string {
   if (!value || value <= 0) {
-    return new Date().toISOString()
+    return MISSING_TIMESTAMP_ISO
   }
   return new Date(value).toISOString()
 }
