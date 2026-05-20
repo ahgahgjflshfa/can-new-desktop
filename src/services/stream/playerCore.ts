@@ -122,7 +122,12 @@ export class HlsPlayerController {
         })
 
         if (data.type === Hls.ErrorTypes.NETWORK_ERROR || data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-          this.handleRecoverableError(data.type === Hls.ErrorTypes.NETWORK_ERROR ? 'network_timeout' : 'unknown')
+          const canRecover = this.handleRecoverableError(
+            data.type === Hls.ErrorTypes.NETWORK_ERROR ? 'network_timeout' : 'unknown'
+          )
+          if (!canRecover) {
+            return
+          }
 
           if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
             this.logWarn('Restarting HLS network load after fatal network error', {
@@ -374,7 +379,7 @@ export class HlsPlayerController {
     }
   }
 
-  private handleRecoverableError(code: StreamErrorCode): void {
+  private handleRecoverableError(code: StreamErrorCode): boolean {
     this.recoveryAttempts += 1
     this.logWarn('Attempting playback recovery', {
       code,
@@ -385,7 +390,7 @@ export class HlsPlayerController {
 
     if (this.recoveryAttempts >= HlsPlayerController.MAX_RECOVERY_ATTEMPTS) {
       this.fail(code, 'Playback recovery attempts exceeded', true)
-      return
+      return false
     }
 
     this.reconnectCount += 1
@@ -393,6 +398,7 @@ export class HlsPlayerController {
       status: this.state.hasLoadedSource ? 'buffering' : 'reconnecting',
       error: null,
     })
+    return true
   }
 
   private mapHlsError(

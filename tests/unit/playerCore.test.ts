@@ -104,4 +104,20 @@ describe('HlsPlayerController', () => {
     expect(hlsInstances.length).toBeGreaterThan(1)
     vi.useRealTimers()
   })
+
+  test('does not keep recovering after max fatal network errors', async () => {
+    const controller = new HlsPlayerController()
+    const video = createVideoElement()
+    controller.attach(video)
+
+    await controller.load({ sourceType: 'hls', sourceUrl: 'https://example.com/live.m3u8' })
+    const hls = hlsInstances[0]
+
+    hls?.emit(FakeHls.Events.ERROR, { fatal: true, type: FakeHls.ErrorTypes.NETWORK_ERROR })
+    hls?.emit(FakeHls.Events.ERROR, { fatal: true, type: FakeHls.ErrorTypes.NETWORK_ERROR })
+    hls?.emit(FakeHls.Events.ERROR, { fatal: true, type: FakeHls.ErrorTypes.NETWORK_ERROR })
+
+    expect(hls?.startLoad).toHaveBeenCalledTimes(2)
+    expect(controller.getState().status).toBe('error')
+  })
 })
