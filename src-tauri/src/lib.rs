@@ -4,6 +4,7 @@ use tauri::Manager;
 
 mod api_client;
 mod auth_commands;
+mod camera_viewer_commands;
 mod constants;
 mod device_id;
 mod ipc_types;
@@ -18,6 +19,7 @@ use constants::POPUP_LABEL;
 use state::{MinimizeToTrayState, PendingNotificationState};
 
 pub use auth_commands::{auth_login, auth_logout};
+pub use camera_viewer_commands::open_camera_viewer;
 pub use device_id::get_or_create_device_id;
 pub use log_commands::export_app_logs;
 pub use popup_commands::{
@@ -60,6 +62,7 @@ pub fn run() {
             get_or_create_device_id,
             auth_login,
             auth_logout,
+            open_camera_viewer,
             fetch_tasks,
             reply_task,
             complete_task,
