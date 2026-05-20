@@ -86,6 +86,19 @@ describe('notificationStore', () => {
       expect(mockPoller.start).toHaveBeenCalled()
       expect(store.isPolling).toBe(true)
     })
+
+    test('clamps invalid persisted polling interval', async () => {
+      localStorage.setItem(
+        'tauri-app:notification-settings',
+        JSON.stringify({ pollingEnabled: true, pollingIntervalMs: 0 })
+      )
+      const store = useNotificationStore()
+
+      await store.init()
+
+      expect(store.pollingIntervalMs).toBe(5000)
+      expect(mockPoller.updateConfig).toHaveBeenCalledWith({ intervalMs: 5000 })
+    })
   })
 
   describe('handleNewNotifications', () => {
@@ -124,11 +137,46 @@ describe('notificationStore', () => {
       const first = createMockNotification({ id: 'first' })
       const second = createMockNotification({ id: 'second' })
 
-      store.handleNewNotifications([first])
-      store.handleNewNotifications([second])
+      store.handleNewNotifications([first, second])
 
       expect(store.currentNotification?.id).toBe('first')
       expect(store.notifications.length).toBe(2)
+    })
+
+    test('dismisses current notification when polling reports it completed remotely', () => {
+      const store = useNotificationStore()
+      const notification = createMockNotification({ id: '1', priority: 'pending' })
+
+      store.handleNewNotifications([notification])
+      store.handleNewNotifications([{ ...notification, priority: 'completed', category: 'completed' }])
+
+      expect(store.currentNotification).toBeNull()
+      expect(store.notifications[0]!.priority).toBe('completed')
+      expect(store.notifications[0]!.status).toBe('dismissed')
+      expect(store.notifications[0]!.dismissedAt).toBeDefined()
+    })
+
+    test('does not create a new local notification for already completed remote tasks', () => {
+      const store = useNotificationStore()
+
+      store.handleNewNotifications([createMockNotification({ id: '1', priority: 'completed' })])
+
+      expect(store.notifications).toHaveLength(0)
+      expect(store.currentNotification).toBeNull()
+    })
+
+    test('dismisses unresolved local notifications missing from a full polling result', () => {
+      const store = useNotificationStore()
+      const first = createMockNotification({ id: '1', priority: 'pending' })
+      const second = createMockNotification({ id: '2', priority: 'pending' })
+
+      store.handleNewNotifications([first, second])
+      store.handleNewNotifications([second])
+
+      const missing = store.notifications.find(notification => notification.id === '1')
+      expect(missing?.status).toBe('dismissed')
+      expect(missing?.dismissedAt).toBeDefined()
+      expect(store.currentNotification?.id).toBe('2')
     })
   })
 
@@ -150,8 +198,7 @@ describe('notificationStore', () => {
       const first = createMockNotification({ id: 'first' })
       const second = createMockNotification({ id: 'second' })
 
-      store.handleNewNotifications([first])
-      store.handleNewNotifications([second])
+      store.handleNewNotifications([first, second])
 
       await store.dismissCurrentNotification()
 
@@ -203,9 +250,7 @@ describe('notificationStore', () => {
       const first = createMockNotification({ id: '1' })
       const second = createMockNotification({ id: '2' })
 
-      // Add notifications one by one so we know the order
-      store.handleNewNotifications([first]) // '1' becomes 'shown' (current)
-      store.handleNewNotifications([second]) // '2' stays 'pending'
+      store.handleNewNotifications([first, second]) // '1' becomes 'shown', '2' stays pending
 
       // Find and dismiss notification '2' (which is at index 0 due to unshift)
       const notif2 = store.notifications.find(n => n.id === '2')
@@ -225,9 +270,7 @@ describe('notificationStore', () => {
       const first = createMockNotification({ id: '1' })
       const second = createMockNotification({ id: '2' })
 
-      // Add notifications one by one
-      store.handleNewNotifications([first]) // '1' becomes 'shown'
-      store.handleNewNotifications([second]) // '2' stays 'pending'
+      store.handleNewNotifications([first, second]) // '1' becomes shown, '2' stays pending
 
       // '1' is shown, '2' is pending
       expect(store.pendingNotifications.length).toBe(1)
@@ -239,8 +282,7 @@ describe('notificationStore', () => {
       const first = createMockNotification({ id: '1' })
       const second = createMockNotification({ id: '2' })
 
-      store.handleNewNotifications([first]) // '1' becomes 'shown'
-      store.handleNewNotifications([second]) // '2' stays 'pending'
+      store.handleNewNotifications([first, second]) // '1' becomes shown, '2' stays pending
 
       // Dismiss the first one (which is 'shown')
       const notif1 = store.notifications.find(n => n.id === '1')

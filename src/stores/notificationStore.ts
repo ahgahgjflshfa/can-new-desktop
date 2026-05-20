@@ -11,6 +11,8 @@ const NOTIFICATION_STORAGE_KEY = 'tauri-app:notifications'
 const SETTINGS_STORAGE_KEY = 'tauri-app:notification-settings'
 const MAX_STORED_NOTIFICATIONS = 100
 const DEFAULT_POLLING_INTERVAL = 10000
+const MIN_POLLING_INTERVAL_SECONDS = 5
+const MAX_POLLING_INTERVAL_SECONDS = 300
 const IN_APP_REMINDER_MS = 4000
 const REPLIED_ESCALATION_MS = 15 * 60 * 1000
 
@@ -82,6 +84,14 @@ function normalizeStoredNotification(input: unknown): NotificationState | null {
     metadata:
       record.metadata && typeof record.metadata === 'object' ? (record.metadata as Record<string, unknown>) : undefined,
   }
+}
+
+function clampPollingIntervalSeconds(seconds: number): number {
+  if (!Number.isFinite(seconds)) {
+    return DEFAULT_POLLING_INTERVAL / 1000
+  }
+
+  return Math.max(MIN_POLLING_INTERVAL_SECONDS, Math.min(MAX_POLLING_INTERVAL_SECONDS, seconds))
 }
 
 export const useNotificationStore = defineStore('notifications', {
@@ -174,6 +184,10 @@ export const useNotificationStore = defineStore('notifications', {
       return notification.priority === 'pending' || notification.priority === 'replied'
     },
 
+    isPriorityUnresolved(priority: NotificationPriority) {
+      return priority === 'pending' || priority === 'replied'
+    },
+
     getUnresolvedNotifications() {
       return this.notifications.filter(
         notification => notification.status !== 'dismissed' && this.isTaskUnresolved(notification)
@@ -230,6 +244,39 @@ export const useNotificationStore = defineStore('notifications', {
       if (existing.status === 'dismissed' && this.isTaskUnresolved(existing)) {
         existing.status = 'pending'
         existing.dismissedAt = undefined
+      }
+
+      if (!this.isTaskUnresolved(existing)) {
+        this.resolveNotificationFromPolling(existing.id, incoming.priority)
+      }
+    },
+
+    resolveNotificationFromPolling(notificationId: string, priority?: NotificationPriority) {
+      const notification = this.notifications.find(n => n.id === notificationId)
+      if (!notification) return
+
+      if (priority) {
+        notification.priority = priority
+        notification.category = priority
+      }
+
+      if (notification.status !== 'dismissed') {
+        notification.status = 'dismissed'
+        notification.dismissedAt = new Date().toISOString()
+      }
+
+      if (this.currentNotification?.id === notificationId) {
+        this.currentNotification = null
+      }
+    },
+
+    reconcileMissingRemoteTasks(incomingNotifications: EmergencyNotification[]) {
+      const remoteIds = new Set(incomingNotifications.map(notification => notification.id))
+
+      for (const notification of this.notifications) {
+        if (notification.status !== 'dismissed' && this.isTaskUnresolved(notification) && !remoteIds.has(notification.id)) {
+          this.resolveNotificationFromPolling(notification.id)
+        }
       }
     },
 
@@ -351,6 +398,10 @@ export const useNotificationStore = defineStore('notifications', {
           continue
         }
 
+        if (!this.isPriorityUnresolved(notification.priority)) {
+          continue
+        }
+
         const notificationState = convertToNotificationState(notification)
         if (notificationState.priority === 'replied') {
           notificationState.repliedAt = new Date().toISOString()
@@ -361,6 +412,8 @@ export const useNotificationStore = defineStore('notifications', {
           this.showNotification(notificationState.id)
         }
       }
+
+      this.reconcileMissingRemoteTasks(newNotifications)
 
       void this.runReminderCycle().catch(err => {
         logAppEvent('warn', 'notifications', 'reminder cycle failed', err)
@@ -590,7 +643,7 @@ export const useNotificationStore = defineStore('notifications', {
     },
 
     setPollingInterval(seconds: number) {
-      const clampedSeconds = Math.max(5, Math.min(300, seconds))
+      const clampedSeconds = clampPollingIntervalSeconds(seconds)
       this.pollingIntervalMs = clampedSeconds * 1000
 
       const poller = getNotificationPoller()
@@ -626,7 +679,7 @@ export const useNotificationStore = defineStore('notifications', {
             this.pollingEnabled = settings.pollingEnabled
           }
           if (typeof settings.pollingIntervalMs === 'number') {
-            this.pollingIntervalMs = settings.pollingIntervalMs
+            this.pollingIntervalMs = clampPollingIntervalSeconds(settings.pollingIntervalMs / 1000) * 1000
           }
         } catch (err) {
           logAppEvent('warn', 'notifications', 'failed to parse stored settings', err)
