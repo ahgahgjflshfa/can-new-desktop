@@ -60,6 +60,11 @@ const formattedTime = computed(() => {
 
 async function openMainWindow() {
   logAppEvent('info', 'popup', 'requested opening main window from popup')
+  try {
+    await invoke('hide_alert_popup')
+  } catch (err) {
+    logAppEvent('warn', 'popup', 'failed to hide popup before opening main window', err)
+  }
   await invoke('show_emergency_window')
 }
 

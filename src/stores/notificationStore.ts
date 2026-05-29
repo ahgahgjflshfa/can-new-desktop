@@ -4,7 +4,6 @@ import { getNotificationPoller, convertToNotificationState, type PollingStats } 
 import { completeTask, replyTask, type CompletionResult } from '@/services/taskActionService'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification'
 import { isTauriRuntime } from '@/tauri/window'
 import { logAppEvent } from '@/services/appLogger'
 
@@ -18,6 +17,7 @@ const IN_APP_REMINDER_MS = 4000
 const REPLIED_ESCALATION_MS = 15 * 60 * 1000
 
 let _dismissEventUnlisten: UnlistenFn | null = null
+let _windowFocusHandler: (() => void) | null = null
 let inAppReminderTimeoutId: ReturnType<typeof setTimeout> | null = null
 
 function clearInAppReminderTimeout(): void {
@@ -175,6 +175,7 @@ export const useNotificationStore = defineStore('notifications', {
     async init() {
       this.loadFromStorage()
       await this.setupDismissListener()
+      this.setupWindowFocusListener()
       if (this.pollingEnabled) {
         this.startPolling()
       }
@@ -353,12 +354,26 @@ export const useNotificationStore = defineStore('notifications', {
       }
     },
 
+    setupWindowFocusListener() {
+      if (_windowFocusHandler) return
+      _windowFocusHandler = () => {
+        if (this.currentNotification) {
+          this.hidePopup()
+        }
+      }
+      window.addEventListener('focus', _windowFocusHandler)
+    },
+
     teardown() {
       this.stopPolling()
       clearInAppReminderTimeout()
       if (_dismissEventUnlisten) {
         _dismissEventUnlisten()
         _dismissEventUnlisten = null
+      }
+      if (_windowFocusHandler) {
+        window.removeEventListener('focus', _windowFocusHandler)
+        _windowFocusHandler = null
       }
     },
 
@@ -448,48 +463,27 @@ export const useNotificationStore = defineStore('notifications', {
 
       if (!isTauriRuntime()) return
 
-      if (isMainWindowActive()) {
-        try {
-          let permissionGranted = await isPermissionGranted()
-          if (!permissionGranted) {
-            const permission = await requestPermission()
-            permissionGranted = permission === 'granted'
-          }
-          if (permissionGranted) {
-            sendNotification({
-              title: notification.title,
-              body: notification.body,
-            })
-            logAppEvent('info', 'notifications', 'sent system notification', {
-              notificationId: notification.id,
-            })
-          } else {
-            logAppEvent('warn', 'notifications', 'notification permission denied, skipping system notification')
-          }
-        } catch (err) {
-          logAppEvent('warn', 'notifications', 'failed to send system notification', err)
-        }
-      } else {
-        try {
-          logAppEvent('info', 'notifications', 'showing alert popup', {
-            notificationId: notification.id,
+      if (isMainWindowActive()) return
+
+      try {
+        logAppEvent('info', 'notifications', 'showing alert popup', {
+          notificationId: notification.id,
+          priority: notification.priority,
+        })
+        await invoke('show_alert_popup', {
+          notification: {
+            id: notification.id,
+            title: notification.title,
+            body: notification.body,
             priority: notification.priority,
-          })
-          await invoke('show_alert_popup', {
-            notification: {
-              id: notification.id,
-              title: notification.title,
-              body: notification.body,
-              priority: notification.priority,
-              category: notification.category,
-              createdAt: notification.createdAt,
-              unreadCount: this.unreadCount,
-            },
-          })
-        } catch (err) {
-          logAppEvent('warn', 'notifications', 'failed to show alert popup', err)
-          console.warn('Failed to show alert popup:', err)
-        }
+            category: notification.category,
+            createdAt: notification.createdAt,
+            unreadCount: this.unreadCount,
+          },
+        })
+      } catch (err) {
+        logAppEvent('warn', 'notifications', 'failed to show alert popup', err)
+        console.warn('Failed to show alert popup:', err)
       }
     },
 
