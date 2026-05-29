@@ -52,6 +52,15 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            #[cfg(desktop)]
+            {
+                use tauri_plugin_autostart::MacosLauncher;
+                app.handle().plugin(tauri_plugin_autostart::init(
+                    MacosLauncher::LaunchAgent,
+                    None,
+                ));
+            }
+
             #[cfg(debug_assertions)]
             {
                 let window = tauri::Manager::get_webview_window(app, "main").unwrap();

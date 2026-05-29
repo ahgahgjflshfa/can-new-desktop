@@ -14,10 +14,15 @@ const minimizeOnClose = computed({
   set: value => store.setMinimizeToTrayOnClose(value),
 })
 
-const pollingEnabled = computed({
-  get: () => notificationStore.pollingEnabled,
-  set: value => notificationStore.setPollingEnabled(value),
-})
+  const pollingEnabled = computed({
+    get: () => notificationStore.pollingEnabled,
+    set: value => notificationStore.setPollingEnabled(value),
+  })
+
+  const autoLaunch = computed({
+    get: () => store.autoLaunchEnabled,
+    set: value => store.setAutoLaunchEnabled(value),
+  })
 
 const pollingInterval = ref(notificationStore.pollingIntervalSeconds)
 const logEntryCount = ref(getAppLogs().length)
@@ -164,18 +169,34 @@ async function handleOpenCameraViewer() {
           視窗行為
         </h2>
 
-        <div class="flex items-center justify-between py-2">
-          <div class="flex flex-col">
-            <label for="minimize-toggle" class="text-base font-medium text-[var(--app-fg)]">關閉時縮小到系統匣</label>
-            <span class="text-sm text-[var(--app-muted)]">關閉視窗後仍讓應用程式在系統匣中持續執行</span>
+        <div class="space-y-4">
+          <div class="flex items-center justify-between py-2">
+            <div class="flex flex-col">
+              <label for="autostart-toggle" class="text-base font-medium text-[var(--app-fg)]">開機自動啟動</label>
+              <span class="text-sm text-[var(--app-muted)]">系統開機時自動啟動應用程式</span>
+            </div>
+
+            <label class="relative inline-flex items-center cursor-pointer">
+              <input id="autostart-toggle" type="checkbox" v-model="autoLaunch" class="sr-only peer" />
+              <div
+                class="w-11 h-6 bg-[var(--app-control-bg)] peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[var(--app-primary)] rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-[var(--app-control-knob)] after:border-[var(--app-border)] after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[var(--app-primary-strong)]"
+              ></div>
+            </label>
           </div>
 
-          <label class="relative inline-flex items-center cursor-pointer">
-            <input id="minimize-toggle" type="checkbox" v-model="minimizeOnClose" class="sr-only peer" />
-            <div
-              class="w-11 h-6 bg-[var(--app-control-bg)] peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[var(--app-primary)] rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-[var(--app-control-knob)] after:border-[var(--app-border)] after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[var(--app-primary-strong)]"
-            ></div>
-          </label>
+          <div class="flex items-center justify-between py-2">
+            <div class="flex flex-col">
+              <label for="minimize-toggle" class="text-base font-medium text-[var(--app-fg)]">關閉時縮小到系統匣</label>
+              <span class="text-sm text-[var(--app-muted)]">關閉視窗後仍讓應用程式在系統匣中持續執行</span>
+            </div>
+
+            <label class="relative inline-flex items-center cursor-pointer">
+              <input id="minimize-toggle" type="checkbox" v-model="minimizeOnClose" class="sr-only peer" />
+              <div
+                class="w-11 h-6 bg-[var(--app-control-bg)] peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[var(--app-primary)] rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-[var(--app-control-knob)] after:border-[var(--app-border)] after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[var(--app-primary-strong)]"
+              ></div>
+            </label>
+          </div>
         </div>
       </div>
 

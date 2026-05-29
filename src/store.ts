@@ -2,6 +2,7 @@ import { acceptHMRUpdate, defineStore } from 'pinia'
 
 import { invoke } from '@tauri-apps/api/core'
 import { logAppEvent } from '@/services/appLogger'
+import { isTauriRuntime } from '@/tauri/window'
 
 import { hideCurrentWindow } from './tauri/window'
 
@@ -11,9 +12,25 @@ async function syncMinimizeToTraySettingToBackend(enabled: boolean): Promise<voi
   try {
     await invoke('set_minimize_to_tray_on_close', { enabled })
   } catch (err) {
-    // Non-Tauri runtime or command not available.
     logAppEvent('warn', 'settings', 'failed to sync minimize-to-tray setting to backend', err)
     console.warn('failed to sync minimize-to-tray setting to backend', err)
+  }
+}
+
+async function syncAutostartToBackend(enabled: boolean): Promise<void> {
+  if (!isTauriRuntime()) return
+
+  try {
+    const autostart = await import('@tauri-apps/plugin-autostart')
+    if (enabled) {
+      await autostart.enable()
+    } else {
+      await autostart.disable()
+    }
+    logAppEvent('info', 'settings', 'synced autostart setting to backend', { enabled })
+  } catch (err) {
+    logAppEvent('warn', 'settings', 'failed to sync autostart setting to backend', err)
+    console.warn('failed to sync autostart setting to backend', err)
   }
 }
 
@@ -27,6 +44,7 @@ export const useStore = defineStore('main', {
     isInitialized: false,
     currentView: 'notifications' as 'home' | 'settings' | 'notifications',
     minimizeToTrayOnClose: false,
+    autoLaunchEnabled: true,
     cameraViewerUrl: '',
   }),
 
@@ -34,9 +52,11 @@ export const useStore = defineStore('main', {
     initApp() {
       this.loadSettingsFromStorage()
       void syncMinimizeToTraySettingToBackend(this.minimizeToTrayOnClose)
+      void syncAutostartToBackend(this.autoLaunchEnabled)
       this.isInitialized = true
       logAppEvent('info', 'app', 'application initialized', {
         minimizeToTrayOnClose: this.minimizeToTrayOnClose,
+        autoLaunchEnabled: this.autoLaunchEnabled,
       })
       console.log('app initialized!')
     },
@@ -46,6 +66,13 @@ export const useStore = defineStore('main', {
       this.saveSettingsToStorage()
       logAppEvent('info', 'settings', 'updated minimize-to-tray preference', { enabled })
       void syncMinimizeToTraySettingToBackend(enabled)
+    },
+
+    setAutoLaunchEnabled(enabled: boolean) {
+      this.autoLaunchEnabled = enabled
+      this.saveSettingsToStorage()
+      logAppEvent('info', 'settings', 'updated autostart preference', { enabled })
+      void syncAutostartToBackend(enabled)
     },
 
     setCameraViewerUrl(url: string) {
@@ -83,6 +110,11 @@ export const useStore = defineStore('main', {
         this.minimizeToTrayOnClose = minimizeToTrayOnClose
       }
 
+      const autoLaunchEnabled = record.autoLaunchEnabled
+      if (typeof autoLaunchEnabled === 'boolean') {
+        this.autoLaunchEnabled = autoLaunchEnabled
+      }
+
       const cameraViewerUrl = record.cameraViewerUrl
       if (typeof cameraViewerUrl === 'string') {
         this.cameraViewerUrl = cameraViewerUrl
@@ -100,6 +132,7 @@ export const useStore = defineStore('main', {
 
       const payload = {
         minimizeToTrayOnClose: this.minimizeToTrayOnClose,
+        autoLaunchEnabled: this.autoLaunchEnabled,
         cameraViewerUrl: this.cameraViewerUrl,
       }
 
