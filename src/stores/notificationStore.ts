@@ -4,6 +4,7 @@ import { getNotificationPoller, convertToNotificationState, type PollingStats } 
 import { completeTask, replyTask, type CompletionResult } from '@/services/taskActionService'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification'
 import { isTauriRuntime } from '@/tauri/window'
 import { logAppEvent } from '@/services/appLogger'
 
@@ -445,7 +446,30 @@ export const useNotificationStore = defineStore('notifications', {
       notification.status = 'shown'
       this.currentNotification = notification
 
-      if (isTauriRuntime()) {
+      if (!isTauriRuntime()) return
+
+      if (isMainWindowActive()) {
+        try {
+          let permissionGranted = await isPermissionGranted()
+          if (!permissionGranted) {
+            const permission = await requestPermission()
+            permissionGranted = permission === 'granted'
+          }
+          if (permissionGranted) {
+            sendNotification({
+              title: notification.title,
+              body: notification.body,
+            })
+            logAppEvent('info', 'notifications', 'sent system notification', {
+              notificationId: notification.id,
+            })
+          } else {
+            logAppEvent('warn', 'notifications', 'notification permission denied, skipping system notification')
+          }
+        } catch (err) {
+          logAppEvent('warn', 'notifications', 'failed to send system notification', err)
+        }
+      } else {
         try {
           logAppEvent('info', 'notifications', 'showing alert popup', {
             notificationId: notification.id,
