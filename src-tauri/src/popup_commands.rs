@@ -99,21 +99,13 @@ pub async fn show_alert_popup(
 }
 
 #[tauri::command]
-pub async fn hide_alert_popup(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, PendingNotificationState>,
-) -> Result<(), String> {
-    {
-        let mut pending = state.notification.lock().map_err(|e| e.to_string())?;
-        *pending = None;
-    }
-
+pub async fn hide_alert_popup(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(POPUP_LABEL) {
-        runtime_log::info(LOG_SOURCE, "Closing popup window");
-        window.close().map_err(|e| {
+        runtime_log::info(LOG_SOURCE, "Hiding popup window");
+        window.hide().map_err(|e| {
             runtime_log::error(
                 LOG_SOURCE,
-                format!("Failed closing popup window: {}", e).as_str(),
+                format!("Failed hiding popup window: {}", e).as_str(),
             );
             e.to_string()
         })?;
