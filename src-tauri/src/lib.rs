@@ -1,6 +1,6 @@
 use std::sync::atomic::Ordering;
 
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 mod api_client;
 mod auth_commands;
@@ -16,6 +16,7 @@ mod task_commands;
 mod window_controls;
 
 use constants::POPUP_LABEL;
+use crate::ipc_types::DismissPayload;
 use state::{MinimizeToTrayState, PendingNotificationState};
 
 pub use auth_commands::{auth_login, auth_logout};
@@ -36,8 +37,10 @@ pub fn run() {
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == POPUP_LABEL {
-                    api.prevent_close();
-                    let _ = window.hide();
+                    let _ = window.app_handle().emit("dismiss-notification", DismissPayload {
+                        notification_id: None,
+                        dismiss_all: true,
+                    });
                     return;
                 }
 

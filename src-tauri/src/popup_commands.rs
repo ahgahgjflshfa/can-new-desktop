@@ -99,13 +99,21 @@ pub async fn show_alert_popup(
 }
 
 #[tauri::command]
-pub async fn hide_alert_popup(app: tauri::AppHandle) -> Result<(), String> {
+pub async fn hide_alert_popup(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, PendingNotificationState>,
+) -> Result<(), String> {
+    {
+        let mut pending = state.notification.lock().map_err(|e| e.to_string())?;
+        *pending = None;
+    }
+
     if let Some(window) = app.get_webview_window(POPUP_LABEL) {
-        runtime_log::info(LOG_SOURCE, "Hiding popup window");
-        window.hide().map_err(|e| {
+        runtime_log::info(LOG_SOURCE, "Closing popup window");
+        window.close().map_err(|e| {
             runtime_log::error(
                 LOG_SOURCE,
-                format!("Failed hiding popup window: {}", e).as_str(),
+                format!("Failed closing popup window: {}", e).as_str(),
             );
             e.to_string()
         })?;
@@ -121,6 +129,7 @@ pub async fn hide_alert_popup(app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn emit_dismiss_notification(
     app: tauri::AppHandle,
+    state: tauri::State<'_, PendingNotificationState>,
     notification_id: Option<String>,
     dismiss_all: bool,
 ) -> Result<(), String> {
@@ -132,6 +141,18 @@ pub async fn emit_dismiss_notification(
         )
         .as_str(),
     );
+
+    {
+        let mut pending = state.notification.lock().map_err(|e| e.to_string())?;
+        if dismiss_all {
+            *pending = None;
+        } else if let Some(ref id) = notification_id {
+            if pending.as_ref().map(|n| n.id == *id).unwrap_or(false) {
+                *pending = None;
+            }
+        }
+    }
+
     let payload = DismissPayload {
         notification_id,
         dismiss_all,

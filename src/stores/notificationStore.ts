@@ -17,7 +17,6 @@ const IN_APP_REMINDER_MS = 4000
 const REPLIED_ESCALATION_MS = 15 * 60 * 1000
 
 let _dismissEventUnlisten: UnlistenFn | null = null
-let _popupClosedUnlisten: UnlistenFn | null = null
 let inAppReminderTimeoutId: ReturnType<typeof setTimeout> | null = null
 
 function clearInAppReminderTimeout(): void {
@@ -329,7 +328,9 @@ export const useNotificationStore = defineStore('notifications', {
       }
 
       this.hideInAppReminder()
-      await this.showNotification(target.id)
+      if (this.currentNotification?.id !== target.id || target.status !== 'shown') {
+        await this.showNotification(target.id)
+      }
     },
 
     async setupDismissListener() {
@@ -348,6 +349,15 @@ export const useNotificationStore = defineStore('notifications', {
       } catch (err) {
         logAppEvent('warn', 'notifications', 'failed to set up dismiss listener', err)
         console.warn('Failed to setup dismiss listener:', err)
+      }
+    },
+
+    teardown() {
+      this.stopPolling()
+      clearInAppReminderTimeout()
+      if (_dismissEventUnlisten) {
+        _dismissEventUnlisten()
+        _dismissEventUnlisten = null
       }
     },
 
@@ -427,6 +437,10 @@ export const useNotificationStore = defineStore('notifications', {
     async showNotification(notificationId: string) {
       const notification = this.notifications.find(n => n.id === notificationId)
       if (!notification) return
+
+      if (this.currentNotification?.id === notificationId && notification.status === 'shown') {
+        return
+      }
 
       notification.status = 'shown'
       this.currentNotification = notification
@@ -617,17 +631,24 @@ export const useNotificationStore = defineStore('notifications', {
     },
 
     pruneOldNotifications() {
-      if (this.notifications.length > MAX_STORED_NOTIFICATIONS) {
-        const dismissedToRemove = this.notifications
-          .filter(n => n.status === 'dismissed')
-          .slice(MAX_STORED_NOTIFICATIONS / 2)
+      if (this.notifications.length <= MAX_STORED_NOTIFICATIONS) {
+        return
+      }
 
-        for (const notification of dismissedToRemove) {
-          const index = this.notifications.findIndex(n => n.id === notification.id)
-          if (index !== -1) {
-            this.notifications.splice(index, 1)
-          }
+      const dismissedToRemove = this.notifications
+        .filter(n => n.status === 'dismissed')
+        .slice(Math.floor(MAX_STORED_NOTIFICATIONS / 2))
+
+      for (const notification of dismissedToRemove) {
+        const index = this.notifications.findIndex(n => n.id === notification.id)
+        if (index !== -1) {
+          this.notifications.splice(index, 1)
         }
+      }
+
+      if (this.notifications.length > MAX_STORED_NOTIFICATIONS) {
+        const excess = this.notifications.length - MAX_STORED_NOTIFICATIONS
+        this.notifications.splice(-excess, excess)
       }
     },
 

@@ -19,8 +19,7 @@ interface NotificationPayload {
 const currentNotification = ref<NotificationPayload | null>(null)
 const isAcknowledging = ref(false)
 const acknowledgeError = ref<string | null>(null)
-let unlistenShow: UnlistenFn | null = null
-let unlistenHide: UnlistenFn | null = null
+  let unlistenShow: UnlistenFn | null = null
 
 const priorityConfig: Record<NotificationPriority, { bgClass: string; iconClass: string; label: string }> = {
   pending: {
@@ -101,11 +100,6 @@ onMounted(async () => {
     currentNotification.value = event.payload
   })
 
-  unlistenHide = await listen('hide-notification', () => {
-    logAppEvent('info', 'popup', 'received hide-notification event')
-    currentNotification.value = null
-  })
-
   try {
     console.log('[Popup] Calling get_pending_notification...')
     const pending = await invoke<NotificationPayload | null>('get_pending_notification')
@@ -122,7 +116,6 @@ onMounted(async () => {
 
 onUnmounted(() => {
   unlistenShow?.()
-  unlistenHide?.()
 })
 </script>
 
