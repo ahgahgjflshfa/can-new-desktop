@@ -1,6 +1,6 @@
 use std::sync::atomic::Ordering;
 
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 mod api_client;
 mod auth_commands;
@@ -16,6 +16,7 @@ mod task_commands;
 mod window_controls;
 
 use constants::POPUP_LABEL;
+use ipc_types::PopupClosedPayload;
 use state::{MinimizeToTrayState, PendingNotificationState};
 
 pub use auth_commands::{auth_login, auth_logout};
@@ -37,6 +38,19 @@ pub fn run() {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == POPUP_LABEL {
                     api.prevent_close();
+
+                    let state = window.state::<PendingNotificationState>();
+                    let notification_id = state.notification.lock().ok().and_then(|mut pending| {
+                        let id = pending.as_ref().map(|n| n.id.clone());
+                        *pending = None;
+                        id
+                    });
+
+                    let payload = PopupClosedPayload { notification_id };
+                    if let Some(main_window) = window.app_handle().get_webview_window("main") {
+                        let _ = main_window.emit("popup-closed", payload);
+                    }
+
                     let _ = window.hide();
                     return;
                 }
@@ -52,7 +66,7 @@ pub fn run() {
             #[cfg(desktop)]
             {
                 use tauri_plugin_autostart::MacosLauncher;
-                app.handle().plugin(tauri_plugin_autostart::init(
+                let _ = app.handle().plugin(tauri_plugin_autostart::init(
                     MacosLauncher::LaunchAgent,
                     None,
                 ));

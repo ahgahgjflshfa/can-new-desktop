@@ -20,6 +20,7 @@ fn main_window<R: Runtime>(app: &AppHandle<R>) -> Option<tauri::WebviewWindow<R>
 fn focus_main_window<R: Runtime>(app: &AppHandle<R>) {
     if let Some(window) = main_window(app) {
         runtime_log::info(LOG_SOURCE, "Showing and focusing main window");
+        let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
     } else {
@@ -54,7 +55,7 @@ fn ensure_tray_icon<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                 ..
             } = event
             {
-                focus_main_window(&tray.app_handle());
+                focus_main_window(tray.app_handle());
             }
         });
 
@@ -97,6 +98,7 @@ pub fn set_minimize_to_tray_on_close(
 pub async fn show_emergency_window(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(window) = main_window(&app) {
         runtime_log::info(LOG_SOURCE, "Showing emergency window");
+        let _ = window.unminimize();
         window.show().map_err(|e| e.to_string())?;
         window.set_always_on_top(false).map_err(|e| e.to_string())?;
         window.set_focus().map_err(|e| e.to_string())?;

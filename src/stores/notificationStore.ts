@@ -17,6 +17,7 @@ const IN_APP_REMINDER_MS = 4000
 const REPLIED_ESCALATION_MS = 15 * 60 * 1000
 
 let _dismissEventUnlisten: UnlistenFn | null = null
+let _popupClosedEventUnlisten: UnlistenFn | null = null
 let _windowFocusHandler: (() => void) | null = null
 let inAppReminderTimeoutId: ReturnType<typeof setTimeout> | null = null
 
@@ -37,6 +38,10 @@ function isMainWindowActive(): boolean {
 interface DismissPayload {
   notificationId: string | null
   dismissAll: boolean
+}
+
+interface PopupClosedPayload {
+  notificationId: string | null
 }
 
 function normalizePriority(value: unknown): NotificationPriority {
@@ -175,6 +180,7 @@ export const useNotificationStore = defineStore('notifications', {
     async init() {
       this.loadFromStorage()
       await this.setupDismissListener()
+      await this.setupPopupClosedListener()
       this.setupWindowFocusListener()
       if (this.pollingEnabled) {
         this.startPolling()
@@ -354,6 +360,35 @@ export const useNotificationStore = defineStore('notifications', {
       }
     },
 
+    async setupPopupClosedListener() {
+      if (!isTauriRuntime()) return
+      if (_popupClosedEventUnlisten) return
+
+      try {
+        _popupClosedEventUnlisten = await listen<PopupClosedPayload>('popup-closed', event => {
+          logAppEvent('info', 'notifications', 'received popup-closed event', event.payload)
+          const { notificationId } = event.payload
+          if (notificationId) {
+            const notification = this.notifications.find(n => n.id === notificationId)
+            if (notification && notification.status !== 'dismissed') {
+              notification.status = 'pending'
+              notification.dismissedAt = undefined
+            }
+            if (this.currentNotification?.id === notificationId) {
+              this.currentNotification = null
+            }
+          }
+          void this.runReminderCycle().catch(err => {
+            logAppEvent('warn', 'notifications', 'reminder cycle after popup-closed failed', err)
+            console.warn('Reminder cycle after popup-closed failed:', err)
+          })
+        })
+      } catch (err) {
+        logAppEvent('warn', 'notifications', 'failed to set up popup-closed listener', err)
+        console.warn('Failed to setup popup-closed listener:', err)
+      }
+    },
+
     setupWindowFocusListener() {
       if (_windowFocusHandler) return
       _windowFocusHandler = () => {
@@ -370,6 +405,10 @@ export const useNotificationStore = defineStore('notifications', {
       if (_dismissEventUnlisten) {
         _dismissEventUnlisten()
         _dismissEventUnlisten = null
+      }
+      if (_popupClosedEventUnlisten) {
+        _popupClosedEventUnlisten()
+        _popupClosedEventUnlisten = null
       }
       if (_windowFocusHandler) {
         window.removeEventListener('focus', _windowFocusHandler)

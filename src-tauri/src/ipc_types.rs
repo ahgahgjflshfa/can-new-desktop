@@ -20,3 +20,9 @@ pub struct DismissPayload {
     #[serde(rename = "dismissAll")]
     pub dismiss_all: bool,
 }
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct PopupClosedPayload {
+    #[serde(rename = "notificationId")]
+    pub notification_id: Option<String>,
+}
