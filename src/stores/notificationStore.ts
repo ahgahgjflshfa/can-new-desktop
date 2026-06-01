@@ -120,6 +120,7 @@ export const useNotificationStore = defineStore('notifications', {
     taskActionError: null as string | null,
     inAppReminderVisible: false,
     inAppReminderCount: 0,
+    isPopupVisible: false,
   }),
 
   getters: {
@@ -336,7 +337,7 @@ export const useNotificationStore = defineStore('notifications', {
       }
 
       this.hideInAppReminder()
-      if (this.currentNotification?.id !== target.id || target.status !== 'shown') {
+      if (this.currentNotification?.id !== target.id || target.status !== 'shown' || !this.isPopupVisible) {
         await this.showNotification(target.id)
       }
     },
@@ -378,6 +379,7 @@ export const useNotificationStore = defineStore('notifications', {
               this.currentNotification = null
             }
           }
+          this.isPopupVisible = false
           void this.runReminderCycle().catch(err => {
             logAppEvent('warn', 'notifications', 'reminder cycle after popup-closed failed', err)
             console.warn('Reminder cycle after popup-closed failed:', err)
@@ -493,12 +495,13 @@ export const useNotificationStore = defineStore('notifications', {
       const notification = this.notifications.find(n => n.id === notificationId)
       if (!notification) return
 
-      if (this.currentNotification?.id === notificationId && notification.status === 'shown') {
+      if (this.currentNotification?.id === notificationId && notification.status === 'shown' && this.isPopupVisible) {
         return
       }
 
       notification.status = 'shown'
       this.currentNotification = notification
+      this.isPopupVisible = true
 
       if (!isTauriRuntime()) return
 
@@ -661,6 +664,7 @@ export const useNotificationStore = defineStore('notifications', {
     },
 
     async hidePopup() {
+      this.isPopupVisible = false
       if (isTauriRuntime()) {
         try {
           await invoke('hide_alert_popup')
