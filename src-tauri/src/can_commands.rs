@@ -47,6 +47,7 @@ pub struct CanLoginResponse {
 }
 
 #[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CanTaskItem {
     pub serial_number: i64,
     pub station: String,
