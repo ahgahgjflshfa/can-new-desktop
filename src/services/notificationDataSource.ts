@@ -50,12 +50,26 @@ function mapTaskToNotification(task: TaskItem): EmergencyNotification {
   }
 }
 
+const LMA_AUTH_STORAGE_KEY = 'tauri-app:auth:lma'
+
+function getLmaAuthToken(): string | null {
+  if (typeof localStorage === 'undefined') return null
+  const raw = localStorage.getItem(LMA_AUTH_STORAGE_KEY)
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw)
+    return typeof parsed?.token === 'string' ? parsed.token : null
+  } catch {
+    return null
+  }
+}
+
 function createServerNotificationDataSource(): NotificationDataSource {
   return {
     async fetchNotifications(serverUrl?: string, lastSyncTime?: string) {
-      const token = getApiAuthToken()
+      const token = getLmaAuthToken()
       if (!token) {
-        logAppEvent('error', LOG_SOURCE, 'Cannot fetch notifications because auth token is missing')
+        logAppEvent('error', LOG_SOURCE, 'Cannot fetch notifications because LMA auth token is missing')
         throw new Error('Missing authentication token')
       }
 

@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
-const CAN_API_BASE_URL: &str = "https://www.tymetro.com.tw/can_api";
+const CAN_API_BASE_URL: &str = "https://www-u.tymetro.com.tw/can_api";
 
 #[derive(Deserialize)]
 pub(crate) struct CanApiEnvelope<T> {

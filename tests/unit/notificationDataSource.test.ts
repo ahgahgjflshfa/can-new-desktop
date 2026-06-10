@@ -1,21 +1,22 @@
-import { beforeEach, describe, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { fetchNotifications } from '@/services/notificationDataSource'
 
 const invokeMock = vi.hoisted(() => vi.fn())
-const getApiAuthTokenMock = vi.hoisted(() => vi.fn())
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: invokeMock,
 }))
 
-vi.mock('@/services/apiClient', () => ({
-  getApiAuthToken: getApiAuthTokenMock,
-}))
+const LMA_AUTH_STORAGE_KEY = 'tauri-app:auth:lma'
 
 describe('notificationDataSource', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    getApiAuthTokenMock.mockReturnValue('token')
+    localStorage.setItem(LMA_AUTH_STORAGE_KEY, JSON.stringify({ token: 'lma-test-token' }))
+  })
+
+  afterEach(() => {
+    localStorage.removeItem(LMA_AUTH_STORAGE_KEY)
   })
 
   test('does not map missing task timestamps to current time', async () => {
