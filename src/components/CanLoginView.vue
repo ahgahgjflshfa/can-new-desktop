@@ -15,20 +15,20 @@ const canSubmit = computed(() => {
   return form.account.trim().length > 0 && form.password.length > 0 && !authStore.isSubmitting
 })
 
-  async function submitLogin() {
-    formError.value = null
+async function submitLogin() {
+  formError.value = null
 
-    if (!canSubmit.value) {
-      formError.value = '請輸入帳號與密碼。'
-      return
-    }
-
-    try {
-      await authStore.login('lma', form.account.trim(), form.password)
-    } catch {
-      formError.value = authStore.lastError ?? '登入失敗，請稍後再試。'
-    }
+  if (!canSubmit.value) {
+    formError.value = '請輸入帳號與密碼。'
+    return
   }
+
+  try {
+    await authStore.login('can', form.account.trim(), form.password)
+  } catch {
+    formError.value = authStore.lastError ?? '登入失敗，請稍後再試。'
+  }
+}
 </script>
 
 <template>
@@ -38,17 +38,17 @@ const canSubmit = computed(() => {
         <div
           class="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-[var(--app-accent)] text-[var(--app-primary-strong)]"
         >
-          <span class="i-mdi-headset text-[1.3rem]" />
+          <span class="i-mdi-broom text-[1.3rem]" />
         </div>
-        <h1 class="text-[1.4rem] font-black tracking-tight text-[var(--app-fg-strong)]">立碼幫幫忙</h1>
-        <p class="mt-1 text-[0.88rem] font-semibold text-[var(--app-muted)]">LMA 系統登入</p>
+        <h1 class="text-[1.4rem] font-black tracking-tight text-[var(--app-fg-strong)]">Q 潔淨立馬清</h1>
+        <p class="mt-1 text-[0.88rem] font-semibold text-[var(--app-muted)]">CAN 系統登入</p>
       </div>
 
       <form class="flex flex-col gap-3.5" @submit.prevent="submitLogin">
         <label class="block">
           <span class="mb-1.5 block text-xs font-semibold tracking-wide text-[var(--app-muted)]">帳號</span>
           <input
-            id="account"
+            id="can-account"
             v-model="form.account"
             autocomplete="username"
             class="m-0 h-12 w-full rounded-[0.95rem] border border-[var(--app-border)] bg-[var(--app-surface-2)] px-4 text-base text-[var(--app-fg)] shadow-none transition-all placeholder:text-[var(--app-muted-2)] focus:border-[var(--app-primary)] focus:outline-none focus:ring-4 focus:ring-[var(--app-primary-surface)]"
@@ -61,7 +61,7 @@ const canSubmit = computed(() => {
           <span class="mb-1.5 block text-xs font-semibold tracking-wide text-[var(--app-muted)]">密碼</span>
           <div class="relative">
             <input
-              id="password"
+              id="can-password"
               v-model="form.password"
               :type="showPassword ? 'text' : 'password'"
               autocomplete="current-password"

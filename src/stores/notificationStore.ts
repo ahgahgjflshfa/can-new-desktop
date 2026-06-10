@@ -9,7 +9,7 @@ import { logAppEvent } from '@/services/appLogger'
 
 const NOTIFICATION_STORAGE_KEY = 'tauri-app:notifications'
 const SETTINGS_STORAGE_KEY = 'tauri-app:notification-settings'
-const MAX_STORED_NOTIFICATIONS = 100
+const MAX_STORED_NOTIFICATIONS = 20
 const DEFAULT_POLLING_INTERVAL = 10000
 const MIN_POLLING_INTERVAL_SECONDS = 5
 const MAX_POLLING_INTERVAL_SECONDS = 300
@@ -107,6 +107,8 @@ export const useNotificationStore = defineStore('notifications', {
     lastError: null as string | null,
     pollingEnabled: true,
     pollingIntervalMs: DEFAULT_POLLING_INTERVAL,
+    canPollingEnabled: true,
+    canPollingIntervalMs: DEFAULT_POLLING_INTERVAL,
     pollingStats: {
       lastPollTime: null as Date | null,
       nextPollTime: null as Date | null,
@@ -174,6 +176,10 @@ export const useNotificationStore = defineStore('notifications', {
 
     pollingIntervalSeconds: state => {
       return state.pollingIntervalMs / 1000
+    },
+
+    canPollingIntervalSeconds: state => {
+      return state.canPollingIntervalMs / 1000
     },
   },
 
@@ -735,6 +741,19 @@ export const useNotificationStore = defineStore('notifications', {
       logAppEvent('info', 'notifications', 'updated polling interval', { seconds: clampedSeconds })
     },
 
+    setCanPollingEnabled(enabled: boolean) {
+      this.canPollingEnabled = enabled
+      this.saveSettings()
+      logAppEvent('info', 'notifications', 'updated CAN polling enabled setting', { enabled })
+    },
+
+    setCanPollingInterval(seconds: number) {
+      const clampedSeconds = clampPollingIntervalSeconds(seconds)
+      this.canPollingIntervalMs = clampedSeconds * 1000
+      this.saveSettings()
+      logAppEvent('info', 'notifications', 'updated CAN polling interval', { seconds: clampedSeconds })
+    },
+
     loadFromStorage() {
       if (typeof localStorage === 'undefined') return
 
@@ -756,12 +775,23 @@ export const useNotificationStore = defineStore('notifications', {
       const settingsRaw = localStorage.getItem(SETTINGS_STORAGE_KEY)
       if (settingsRaw) {
         try {
-          const settings = JSON.parse(settingsRaw) as { pollingEnabled?: boolean; pollingIntervalMs?: number }
+          const settings = JSON.parse(settingsRaw) as {
+            pollingEnabled?: boolean
+            pollingIntervalMs?: number
+            canPollingEnabled?: boolean
+            canPollingIntervalMs?: number
+          }
           if (typeof settings.pollingEnabled === 'boolean') {
             this.pollingEnabled = settings.pollingEnabled
           }
           if (typeof settings.pollingIntervalMs === 'number') {
             this.pollingIntervalMs = clampPollingIntervalSeconds(settings.pollingIntervalMs / 1000) * 1000
+          }
+          if (typeof settings.canPollingEnabled === 'boolean') {
+            this.canPollingEnabled = settings.canPollingEnabled
+          }
+          if (typeof settings.canPollingIntervalMs === 'number') {
+            this.canPollingIntervalMs = clampPollingIntervalSeconds(settings.canPollingIntervalMs / 1000) * 1000
           }
         } catch (err) {
           logAppEvent('warn', 'notifications', 'failed to parse stored settings', err)
@@ -790,6 +820,8 @@ export const useNotificationStore = defineStore('notifications', {
           JSON.stringify({
             pollingEnabled: this.pollingEnabled,
             pollingIntervalMs: this.pollingIntervalMs,
+            canPollingEnabled: this.canPollingEnabled,
+            canPollingIntervalMs: this.canPollingIntervalMs,
           })
         )
       } catch (err) {

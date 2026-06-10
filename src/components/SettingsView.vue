@@ -19,12 +19,18 @@ const minimizeOnClose = computed({
     set: value => notificationStore.setPollingEnabled(value),
   })
 
+  const canPollingEnabled = computed({
+    get: () => notificationStore.canPollingEnabled,
+    set: value => notificationStore.setCanPollingEnabled(value),
+  })
+
   const autoLaunch = computed({
     get: () => store.autoLaunchEnabled,
     set: value => store.setAutoLaunchEnabled(value),
   })
 
 const pollingInterval = ref(notificationStore.pollingIntervalSeconds)
+const canPollingInterval = ref(notificationStore.canPollingIntervalSeconds)
 const logEntryCount = ref(getAppLogs().length)
 const exportPath = ref<string | null>(null)
 const exportError = ref<string | null>(null)
@@ -51,6 +57,13 @@ function handleIntervalChange(event: Event) {
   const seconds = parseInt(target.value, 10)
   pollingInterval.value = seconds
   notificationStore.setPollingInterval(seconds)
+}
+
+function handleCanIntervalChange(event: Event) {
+  const target = event.target as HTMLSelectElement
+  const seconds = parseInt(target.value, 10)
+  canPollingInterval.value = seconds
+  notificationStore.setCanPollingInterval(seconds)
 }
 
 async function handleExportLogs() {
@@ -156,6 +169,42 @@ async function handleOpenCameraViewer() {
           >
             <span class="i-mdi-alert-circle mr-2" />
             {{ notificationStore.lastError }}
+          </div>
+
+          <div class="border-t border-[var(--app-border)] pt-4 mt-4">
+            <h3 class="text-base font-semibold mb-3 text-[var(--app-fg)]">Q 潔淨立馬清 (CAN)</h3>
+
+            <div class="flex items-center justify-between py-2">
+              <div class="flex flex-col">
+                <label for="can-polling-toggle" class="text-base font-medium text-[var(--app-fg)]">啟用輪詢</label>
+                <span class="text-sm text-[var(--app-muted)]">自動向 CAN 伺服器檢查新任務</span>
+              </div>
+
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input id="can-polling-toggle" type="checkbox" v-model="canPollingEnabled" class="sr-only peer" />
+                <div
+                  class="w-11 h-6 bg-[var(--app-control-bg)] peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[var(--app-primary)] rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-[var(--app-control-knob)] after:border-[var(--app-border)] after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[var(--app-primary-strong)]"
+                ></div>
+              </label>
+            </div>
+
+            <div class="flex items-center justify-between py-2">
+              <div class="flex flex-col">
+                <span class="text-base font-medium text-[var(--app-fg)]">輪詢間隔</span>
+                <span class="text-sm text-[var(--app-muted)]">檢查新任務的頻率</span>
+              </div>
+
+              <select
+                :value="canPollingInterval"
+                :disabled="!canPollingEnabled"
+                class="px-3 py-2 rounded-lg bg-[var(--app-surface-2)] border border-[var(--app-border)] text-[var(--app-fg)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--app-primary)] disabled:opacity-50 disabled:cursor-not-allowed"
+                @change="handleCanIntervalChange"
+              >
+                <option v-for="option in intervalOptions" :key="option.value" :value="option.value">
+                  {{ option.label }}
+                </option>
+              </select>
+            </div>
           </div>
         </div>
       </div>

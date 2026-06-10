@@ -63,7 +63,7 @@ describe('authStore', () => {
     loginWithPasswordMock.mockResolvedValue({ token: 'abc', user: mockUser('Alice') })
     const store = useAuthStore()
 
-    await store.login('alice', 'secret')
+    await store.login('lma', 'alice', 'secret')
 
     expect(store.isAuthenticated).toBe(true)
     expect(store.displayName).toBe('Alice')
@@ -75,7 +75,7 @@ describe('authStore', () => {
     loginWithPasswordMock.mockRejectedValue(new Error('Invalid credentials'))
     const store = useAuthStore()
 
-    await expect(store.login('bad', 'bad')).rejects.toThrow('Invalid credentials')
+    await expect(store.login('lma', 'bad', 'bad')).rejects.toThrow('Invalid credentials')
 
     expect(store.lastError).toBe('Invalid credentials')
     expect(store.isSubmitting).toBe(false)
@@ -94,6 +94,6 @@ describe('authStore', () => {
     expect(logoutWithTokenMock).toHaveBeenCalledWith('will-clear')
     expect(store.token).toBeNull()
     expect(store.user).toBeNull()
-    expect(localStorage.removeItem).toHaveBeenCalledWith('tauri-app:auth')
+    expect(localStorage.removeItem).toHaveBeenCalledWith('tauri-app:auth:lma')
   })
 })

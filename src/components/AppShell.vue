@@ -1,24 +1,30 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useStore } from '@/store'
+import { useSystemStore } from '@/stores/systemStore'
 import { useAuthStore } from '@/stores/authStore'
 
-const store = useStore()
+const systemStore = useSystemStore()
 const authStore = useAuthStore()
 
 const navItems = [
-  { id: 'notifications', label: '警示通知', shortLabel: '警示', icon: 'i-mdi-bell-ring-outline' },
+  { id: 'lma', label: '立碼幫幫忙', shortLabel: '立碼', icon: 'i-mdi-headset' },
+  { id: 'can', label: 'Q 潔淨立馬清', shortLabel: 'Q潔', icon: 'i-mdi-broom' },
   { id: 'settings', label: '設定', shortLabel: '設定', icon: 'i-mdi-cog-outline' },
 ] as const
 
-const currentNavItem = computed(() => navItems.find(item => item.id === store.currentView) ?? navItems[0])
+const currentNavItem = computed(() => navItems.find(item => item.id === systemStore.currentView) ?? navItems[0])
 
 const userInitial = computed(() => authStore.user?.name?.trim().charAt(0).toUpperCase() ?? 'A')
 
-const userMeta = computed(() => authStore.user?.stationId ?? authStore.user?.role ?? '車站服務')
+const userMeta = computed(() => {
+  if (systemStore.currentView === 'can' && authStore.user && 'station' in authStore.user) {
+    return authStore.user.station
+  }
+  return (authStore.user as any)?.stationId ?? (authStore.user as any)?.role ?? '車站服務'
+})
 
-function setView(view: typeof store.currentView) {
-  store.currentView = view
+function setView(view: typeof systemStore.currentView) {
+  systemStore.switchView(view)
 }
 
 async function handleLogout() {
@@ -57,7 +63,7 @@ async function handleLogout() {
             type="button"
             class="group flex w-full items-center rounded-full border transition-all duration-200"
             :class="[
-              store.currentView === item.id
+              systemStore.currentView === item.id
                 ? 'border-transparent bg-[var(--app-nav-active-bg)] text-[var(--app-primary-strong)] shadow-[inset_0_0_0_1px_rgba(156,123,215,0.08)]'
                 : 'border-transparent text-[var(--app-muted)] hover:border-[var(--app-border)] hover:bg-[var(--app-surface-2)] hover:text-[var(--app-fg)]',
               'px-4 py-3.5',
@@ -68,7 +74,7 @@ async function handleLogout() {
                 item.icon,
                 'shrink-0 transition-colors',
                 'text-[1.2rem]',
-                store.currentView === item.id
+                systemStore.currentView === item.id
                   ? 'text-[var(--app-primary-strong)]'
                   : 'text-[var(--app-muted)] group-hover:text-[var(--app-primary-strong)]',
               ]"
@@ -76,6 +82,17 @@ async function handleLogout() {
 
             <div class="ml-4 flex min-w-0 flex-1 items-center justify-between gap-3">
               <span class="truncate text-[0.98rem] font-semibold">{{ item.label }}</span>
+              <span
+                v-if="item.id !== 'settings'"
+                class="shrink-0 w-2 h-2 rounded-full"
+                :class="[
+                  item.id === 'lma' && systemStore.isLmaAuthenticated
+                    ? 'bg-[var(--app-success)]'
+                    : item.id === 'can' && systemStore.isCanAuthenticated
+                      ? 'bg-[var(--app-success)]'
+                      : 'bg-[var(--app-muted-2)]',
+                ]"
+              />
             </div>
           </button>
         </nav>
@@ -131,7 +148,7 @@ async function handleLogout() {
         :key="item.id"
         @click="setView(item.id)"
         class="flex flex-col items-center justify-center w-full h-full space-y-1 active:scale-95 transition-transform"
-        :class="[store.currentView === item.id ? 'text-[var(--app-primary-strong)]' : 'text-[var(--app-muted)]']"
+        :class="[systemStore.currentView === item.id ? 'text-[var(--app-primary-strong)]' : 'text-[var(--app-muted)]']"
       >
         <div :class="[item.icon, 'text-2xl']" />
         <span class="text-[10px] font-medium">{{ item.shortLabel }}</span>

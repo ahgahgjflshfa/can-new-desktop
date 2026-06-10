@@ -12,6 +12,8 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     AppShell: typeof import('./src/components/AppShell.vue')['default']
+    CanLoginView: typeof import('./src/components/CanLoginView.vue')['default']
+    CanTaskView: typeof import('./src/components/CanTaskView.vue')['default']
     HomeView: typeof import('./src/components/HomeView.vue')['default']
     LoginView: typeof import('./src/components/LoginView.vue')['default']
     ManagedStreamPlayer: typeof import('./src/components/stream/ManagedStreamPlayer.vue')['default']
