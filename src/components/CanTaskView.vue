@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useAuthStore } from '@/stores/authStore'
+import { useNotificationStore } from '@/stores/notificationStore'
 import { fetchCanTasks, completeCanTask } from '@/services/canTaskService'
 import { logAppEvent } from '@/services/appLogger'
 import type { CanTask } from '@/types/can'
 
 const authStore = useAuthStore()
+const notificationStore = useNotificationStore()
 const tasks = ref<CanTask[]>([])
 const activeTab = ref<'active' | 'completed'>('active')
 const isLoading = ref(false)
@@ -42,10 +44,11 @@ async function loadTasks() {
 
 function startPolling() {
   if (pollInterval) return
+  if (!notificationStore.canPollingEnabled) return
   void loadTasks()
   pollInterval = setInterval(() => {
     void loadTasks()
-  }, 10000)
+  }, notificationStore.canPollingIntervalMs)
 }
 
 function stopPolling() {
@@ -124,6 +127,21 @@ watch(() => authStore.isAuthenticated, (isAuth) => {
   } else {
     stopPolling()
     tasks.value = []
+  }
+})
+
+watch(() => notificationStore.canPollingEnabled, (enabled) => {
+  if (enabled && authStore.isAuthenticated && userStation.value) {
+    startPolling()
+  } else {
+    stopPolling()
+  }
+})
+
+watch(() => notificationStore.canPollingIntervalMs, () => {
+  if (authStore.isAuthenticated && userStation.value && notificationStore.canPollingEnabled) {
+    stopPolling()
+    startPolling()
   }
 })
 </script>
