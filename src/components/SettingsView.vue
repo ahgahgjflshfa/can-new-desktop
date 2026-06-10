@@ -4,9 +4,14 @@ import { exportAppLogs } from '@/services/logExportService'
 import { getAppLogs, logAppEvent } from '@/services/appLogger'
 import { openCameraViewer } from '@/services/cameraViewerService'
 import { useStore } from '@/store'
+import { useAuthStore } from '@/stores/authStore'
+import { useSystemStore } from '@/stores/systemStore'
 import { useNotificationStore } from '@/stores/notificationStore'
+import { isTauriRuntime } from '@/tauri/window'
 
 const store = useStore()
+const authStore = useAuthStore()
+const systemStore = useSystemStore()
 const notificationStore = useNotificationStore()
 
 const minimizeOnClose = computed({
@@ -42,6 +47,73 @@ const cameraViewerUrl = computed({
   get: () => store.cameraViewerUrl,
   set: value => store.setCameraViewerUrl(value),
 })
+
+const debugInfo = computed(() => {
+  const storage: Record<string, string | null> = {}
+  if (typeof localStorage !== 'undefined') {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (key && key.startsWith('tauri-app')) {
+        storage[key] = localStorage.getItem(key)
+      }
+    }
+  }
+
+  const isCanUser = authStore.user && 'station' in authStore.user
+  const lmaRaw = typeof localStorage !== 'undefined' ? localStorage.getItem('tauri-app:auth:lma') : null
+  const canRaw = typeof localStorage !== 'undefined' ? localStorage.getItem('tauri-app:auth:can') : null
+  const oldRaw = typeof localStorage !== 'undefined' ? localStorage.getItem('tauri-app:auth') : null
+
+  return {
+    version: store.version,
+    environment: isTauriRuntime() ? 'Tauri' : 'Browser',
+    mode: import.meta.env.MODE,
+    currentSystem: systemStore.currentView,
+    currentSystemLabel: systemStore.currentSystemLabel,
+    lmaAuthenticated: systemStore.isLmaAuthenticated,
+    canAuthenticated: systemStore.isCanAuthenticated,
+    authStore: {
+      isAuthenticated: authStore.isAuthenticated,
+      currentSystem: authStore.currentSystem,
+      displayName: authStore.displayName,
+      userType: isCanUser ? 'CAN' : 'LMA',
+      user: authStore.user,
+      tokenPreview: authStore.token ? `${authStore.token.slice(0, 20)}...` : null,
+      isHydrated: authStore.isHydrated,
+      isSubmitting: authStore.isSubmitting,
+      lastError: authStore.lastError,
+    },
+    polling: {
+      isPolling: notificationStore.isPolling,
+      pollingEnabled: notificationStore.pollingEnabled,
+      canPollingEnabled: notificationStore.canPollingEnabled,
+      pollingIntervalMs: notificationStore.pollingIntervalMs,
+      canPollingIntervalMs: notificationStore.canPollingIntervalMs,
+      stats: notificationStore.pollingStats,
+      lastError: notificationStore.lastError,
+    },
+    localStorage: storage,
+    rawStorage: {
+      lma: lmaRaw,
+      can: canRaw,
+      old: oldRaw,
+    },
+  }
+})
+
+const showDebugPanel = ref(false)
+const isCopied = ref(false)
+
+async function copyDebugInfo() {
+  const text = JSON.stringify(debugInfo.value, null, 2)
+  try {
+    await navigator.clipboard.writeText(text)
+    isCopied.value = true
+    setTimeout(() => isCopied.value = false, 2000)
+  } catch {
+    logAppEvent('warn', 'settings', 'failed to copy debug info to clipboard')
+  }
+}
 
 const intervalOptions = [
   { value: 5, label: '5 秒' },
@@ -317,6 +389,127 @@ async function handleOpenCameraViewer() {
           >
             {{ isExportingLogs ? 'Exporting…' : 'Export Log' }}
           </button>
+        </div>
+
+        <div class="border-t border-[var(--app-border)] pt-4 mt-4">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-base font-semibold text-[var(--app-fg)]">Debug 資訊</h3>
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                class="rounded-full bg-[var(--app-surface-2)] px-3 py-1 text-xs font-medium text-[var(--app-muted)] transition-colors hover:bg-[var(--app-hover)] hover:text-[var(--app-fg)]"
+                @click="showDebugPanel = !showDebugPanel"
+              >
+                {{ showDebugPanel ? '收起' : '展開' }}
+              </button>
+              <button
+                type="button"
+                class="rounded-full bg-[var(--app-primary-strong)] px-3 py-1 text-xs font-semibold text-white transition-colors hover:bg-[var(--app-primary)]"
+                @click="copyDebugInfo"
+              >
+                {{ isCopied ? '已複製' : '複製' }}
+              </button>
+            </div>
+          </div>
+
+          <div v-if="showDebugPanel" class="space-y-3">
+            <div class="grid grid-cols-2 gap-2 text-sm">
+              <div class="rounded-lg bg-[var(--app-surface-2)] p-3">
+                <div class="text-xs text-[var(--app-muted)] mb-1">版本</div>
+                <div class="font-medium text-[var(--app-fg)]">{{ debugInfo.version }}</div>
+              </div>
+              <div class="rounded-lg bg-[var(--app-surface-2)] p-3">
+                <div class="text-xs text-[var(--app-muted)] mb-1">環境</div>
+                <div class="font-medium text-[var(--app-fg)]">{{ debugInfo.environment }} / {{ debugInfo.mode }}</div>
+              </div>
+              <div class="rounded-lg bg-[var(--app-surface-2)] p-3">
+                <div class="text-xs text-[var(--app-muted)] mb-1">當前系統</div>
+                <div class="font-medium text-[var(--app-fg)]">{{ debugInfo.currentSystemLabel }}</div>
+              </div>
+              <div class="rounded-lg bg-[var(--app-surface-2)] p-3">
+                <div class="text-xs text-[var(--app-muted)] mb-1">認證狀態</div>
+                <div class="flex gap-2">
+                  <span class="font-medium" :class="debugInfo.lmaAuthenticated ? 'text-[var(--app-success)]' : 'text-[var(--app-muted)]'">
+                    立碼 {{ debugInfo.lmaAuthenticated ? '✓' : '✗' }}
+                  </span>
+                  <span class="font-medium" :class="debugInfo.canAuthenticated ? 'text-[var(--app-success)]' : 'text-[var(--app-muted)]'">
+                    CAN {{ debugInfo.canAuthenticated ? '✓' : '✗' }}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div class="rounded-lg bg-[var(--app-surface-2)] p-3">
+              <div class="text-xs text-[var(--app-muted)] mb-2">使用者資訊</div>
+              <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                <div class="text-[var(--app-muted)]">類型</div>
+                <div class="text-[var(--app-fg)]">{{ debugInfo.authStore.userType }}</div>
+                <div class="text-[var(--app-muted)]">名稱</div>
+                <div class="text-[var(--app-fg)]">{{ debugInfo.authStore.displayName || '—' }}</div>
+                <div class="text-[var(--app-muted)]">站點</div>
+                <div class="text-[var(--app-fg)]">{{ debugInfo.authStore.user && 'station' in debugInfo.authStore.user ? debugInfo.authStore.user.station : debugInfo.authStore.user && 'stationId' in debugInfo.authStore.user ? debugInfo.authStore.user.stationId : '—' }}</div>
+                <div class="text-[var(--app-muted)]">Token</div>
+                <div class="text-[var(--app-fg)] font-mono text-xs">{{ debugInfo.authStore.tokenPreview || '—' }}</div>
+                <div class="text-[var(--app-muted)]">已登入</div>
+                <div class="text-[var(--app-fg)]">{{ debugInfo.authStore.isAuthenticated ? '是' : '否' }}</div>
+                <div class="text-[var(--app-muted)]">已 Hydrated</div>
+                <div class="text-[var(--app-fg)]">{{ debugInfo.authStore.isHydrated ? '是' : '否' }}</div>
+                <div v-if="debugInfo.authStore.lastError" class="text-[var(--app-danger)]">最近錯誤</div>
+                <div v-if="debugInfo.authStore.lastError" class="text-[var(--app-danger)]">{{ debugInfo.authStore.lastError }}</div>
+              </div>
+            </div>
+
+            <div class="rounded-lg bg-[var(--app-surface-2)] p-3">
+              <div class="text-xs text-[var(--app-muted)] mb-2">輪詢狀態</div>
+              <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                <div class="text-[var(--app-muted)]">立碼輪詢</div>
+                <div class="text-[var(--app-fg)]">{{ debugInfo.polling.pollingEnabled ? '啟用' : '停用' }} / {{ debugInfo.polling.pollingIntervalMs / 1000 }}s</div>
+                <div class="text-[var(--app-muted)]">CAN 輪詢</div>
+                <div class="text-[var(--app-fg)]">{{ debugInfo.polling.canPollingEnabled ? '啟用' : '停用' }} / {{ debugInfo.polling.canPollingIntervalMs / 1000 }}s</div>
+                <div class="text-[var(--app-muted)]">正在輪詢</div>
+                <div class="text-[var(--app-fg)]">{{ debugInfo.polling.isPolling ? '是' : '否' }}</div>
+                <div class="text-[var(--app-muted)]">輪詢次數</div>
+                <div class="text-[var(--app-fg)]">{{ debugInfo.polling.stats.pollCount }}</div>
+                <div class="text-[var(--app-muted)]">成功次數</div>
+                <div class="text-[var(--app-fg)]">{{ debugInfo.polling.stats.successCount }}</div>
+                <div class="text-[var(--app-muted)]">錯誤次數</div>
+                <div class="text-[var(--app-fg)]">{{ debugInfo.polling.stats.errorCount }}</div>
+                <div v-if="debugInfo.polling.lastError" class="text-[var(--app-danger)]">輪詢錯誤</div>
+                <div v-if="debugInfo.polling.lastError" class="text-[var(--app-danger)]">{{ debugInfo.polling.lastError }}</div>
+              </div>
+            </div>
+
+            <div class="rounded-lg bg-[var(--app-surface-2)] p-3">
+              <div class="text-xs text-[var(--app-muted)] mb-2">LocalStorage (tauri-app:)</div>
+              <div class="space-y-1">
+                <div v-for="(value, key) in debugInfo.localStorage" :key="key" class="text-sm">
+                  <div class="text-[var(--app-muted)] text-xs">{{ key }}</div>
+                  <div class="text-[var(--app-fg)] font-mono text-xs break-all">{{ value }}</div>
+                </div>
+                <div v-if="Object.keys(debugInfo.localStorage).length === 0" class="text-sm text-[var(--app-muted)]">
+                  無 tauri-app 資料
+                </div>
+              </div>
+            </div>
+
+            <div class="rounded-lg bg-[var(--app-surface-2)] p-3">
+              <div class="text-xs text-[var(--app-muted)] mb-2">原始認證資料</div>
+              <div class="text-[var(--app-fg)] font-mono text-xs break-all">
+                <div v-if="debugInfo.rawStorage.lma" class="mb-1">
+                  <span class="text-[var(--app-muted)]">LMA:</span> {{ debugInfo.rawStorage.lma.slice(0, 100) }}...
+                </div>
+                <div v-if="debugInfo.rawStorage.can" class="mb-1">
+                  <span class="text-[var(--app-muted)]">CAN:</span> {{ debugInfo.rawStorage.can.slice(0, 100) }}...
+                </div>
+                <div v-if="debugInfo.rawStorage.old" class="mb-1">
+                  <span class="text-[var(--app-muted)]">Old:</span> {{ debugInfo.rawStorage.old.slice(0, 100) }}...
+                </div>
+                <div v-if="!debugInfo.rawStorage.lma && !debugInfo.rawStorage.can && !debugInfo.rawStorage.old" class="text-[var(--app-muted)]">
+                  無儲存資料
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
