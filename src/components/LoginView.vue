@@ -41,7 +41,7 @@ const canSubmit = computed(() => {
           <span class="i-mdi-headset text-[1.3rem]" />
         </div>
         <h1 class="text-[1.4rem] font-black tracking-tight text-[var(--app-fg-strong)]">立碼幫幫忙</h1>
-        <p class="mt-1 text-[0.88rem] font-semibold text-[var(--app-muted)]">LMA 系統登入</p>
+        <p class="mt-1 text-[0.88rem] font-semibold text-[var(--app-muted)]">立碼幫幫忙 登入</p>
       </div>
 
       <form class="flex flex-col gap-3.5" @submit.prevent="submitLogin">

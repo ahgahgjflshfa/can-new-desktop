@@ -2,6 +2,8 @@
 import { computed } from 'vue'
 import { useSystemStore } from '@/stores/systemStore'
 import { useAuthStore } from '@/stores/authStore'
+import type { AuthUser } from '@/types/auth'
+import type { CanAuthUser } from '@/types/can'
 
 const systemStore = useSystemStore()
 const authStore = useAuthStore()
@@ -9,27 +11,35 @@ const authStore = useAuthStore()
 const navItems = [
   { id: 'lma', label: '立碼幫幫忙', shortLabel: '立碼', icon: 'i-mdi-headset' },
   { id: 'can', label: 'Q 潔淨立馬清', shortLabel: 'Q潔', icon: 'i-mdi-broom' },
-  { id: 'settings', label: '設定', shortLabel: '設定', icon: 'i-mdi-cog-outline' },
+  { id: 'settings', label: '偏好設定', shortLabel: '偏好', icon: 'i-mdi-cog-outline' },
 ] as const
 
 const currentNavItem = computed(() => navItems.find(item => item.id === systemStore.currentView) ?? navItems[0])
 
 const userInitial = computed(() => authStore.user?.name?.trim().charAt(0).toUpperCase() ?? 'A')
 
+function isLmaUser(user: AuthUser | CanAuthUser | null): user is AuthUser {
+  return Boolean(user && 'stationId' in user)
+}
+
+function isCanUser(user: AuthUser | CanAuthUser | null): user is CanAuthUser {
+  return Boolean(user && 'station' in user)
+}
+
 const userMeta = computed(() => {
-  if (systemStore.currentView === 'can' && authStore.user && 'station' in authStore.user) {
+  if (isCanUser(authStore.user)) {
     return authStore.user.station
   }
-  return (authStore.user as any)?.stationId ?? (authStore.user as any)?.role ?? '車站服務'
+  if (isLmaUser(authStore.user)) {
+    return authStore.user.stationId || authStore.user.role
+  }
+  return '車站服務'
 })
 
 function setView(view: typeof systemStore.currentView) {
   systemStore.switchView(view)
 }
 
-async function handleLogout() {
-  void authStore.logout()
-}
 </script>
 
 <template>
@@ -97,16 +107,7 @@ async function handleLogout() {
           </button>
         </nav>
 
-        <div class="border-t border-[var(--app-border)] px-4 pb-5 pt-4">
-          <button
-            type="button"
-            class="flex w-full items-center rounded-full px-4 py-2.5 text-left text-[var(--app-danger)] transition-colors hover:bg-[var(--app-surface-2)]"
-            @click="handleLogout"
-          >
-            <span class="i-mdi-logout text-[1.1rem]" />
-            <span class="ml-3 text-[1rem] font-medium">登出</span>
-          </button>
-        </div>
+
       </aside>
 
       <main class="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-[var(--app-surface-3)]">

@@ -39,7 +39,7 @@
 }
 
 html {
-  font-size: 13.5px;
+  font-size: 15px;
   color: var(--app-fg);
   background-color: var(--app-bg);
   font-synthesis: none;
