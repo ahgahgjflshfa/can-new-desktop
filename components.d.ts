@@ -23,5 +23,6 @@ declare module 'vue' {
     StreamPlayer: typeof import('./src/components/stream/StreamPlayer.vue')['default']
     StreamStatusBadge: typeof import('./src/components/stream/StreamStatusBadge.vue')['default']
     StreamTestView: typeof import('./src/components/StreamTestView.vue')['default']
+    SystemSettingsPanel: typeof import('./src/components/SystemSettingsPanel.vue')['default']
   }
 }

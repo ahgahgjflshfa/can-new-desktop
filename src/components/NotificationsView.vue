@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useNotificationStore } from '@/stores/notificationStore'
+import SystemSettingsPanel from '@/components/SystemSettingsPanel.vue'
 import type { NotificationPriority, NotificationState } from '@/types/notification'
 import type { CompletionResult } from '@/services/taskActionService'
 
 const notificationStore = useNotificationStore()
-const activeTab = ref<'active' | 'completed'>('active')
+const activeTab = ref<'active' | 'completed' | 'settings'>('active')
+const isLoading = ref(false)
 
 const priorityStyles: Record<NotificationPriority, { borderClass: string; iconClass: string }> = {
   pending: { borderClass: 'border-l-[var(--app-danger)]', iconClass: 'i-mdi-alert-circle text-[var(--app-danger)]' },
@@ -91,6 +93,17 @@ function getStatusBadge(notification: NotificationState): { text: string; class:
       return { text: '已關閉', class: 'bg-[var(--app-surface-2)] text-[var(--app-muted)]' }
   }
 }
+
+onMounted(() => {
+  if (notificationStore.isPolling) {
+    isLoading.value = true
+    void notificationStore.manualRefresh().then(() => {
+      isLoading.value = false
+    }).catch(() => {
+      isLoading.value = false
+    })
+  }
+})
 </script>
 
 <template>
@@ -139,27 +152,53 @@ function getStatusBadge(notification: NotificationState): { text: string; class:
               class="absolute inset-x-0 bottom-0 h-1 rounded-full bg-[var(--app-primary)]"
             />
           </button>
+
+          <button
+            type="button"
+            class="relative whitespace-nowrap px-2 pb-5 pt-4 text-lg font-semibold transition-colors"
+            :class="
+              activeTab === 'settings'
+                ? 'text-[var(--app-primary-strong)]'
+                : 'text-[var(--app-muted)] hover:text-[var(--app-fg)]'
+            "
+            @click="activeTab = 'settings'"
+          >
+            設定
+            <span
+              v-if="activeTab === 'settings'"
+              class="absolute inset-x-0 bottom-0 h-1 rounded-full bg-[var(--app-primary)]"
+            />
+          </button>
         </div>
       </div>
     </div>
 
     <div class="mx-auto max-w-5xl px-6 py-6 md:px-8 md:py-8">
-      <div class="overflow-hidden rounded-[1.5rem] border border-[var(--app-border)] bg-[var(--app-surface)]">
+      <div v-if="activeTab !== 'settings'" class="overflow-hidden rounded-[1.5rem] border border-[var(--app-border)] bg-[var(--app-surface)]">
         <div class="flex items-center justify-between border-b border-[var(--app-border)] p-4">
           <h2 class="flex items-center gap-2 text-xl font-semibold text-[var(--app-fg)]">
             <div class="i-mdi-history text-[var(--app-primary-strong)]" />
             {{ activeTab === 'active' ? '進行中' : '已完成' }}
           </h2>
 
-          <button
-            v-if="activeTab === 'completed' && notificationStore.dismissedNotifications.length > 0"
-            type="button"
-            class="rounded-lg px-3 py-1.5 text-sm font-medium text-[var(--app-muted)] transition-colors hover:bg-[var(--app-hover)] hover:text-[var(--app-fg)]"
-            @click="handleClearHistory"
-          >
-            <span class="i-mdi-delete-sweep mr-1" />
-            清除已關閉項目
-          </button>
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              class="rounded-lg px-3 py-1.5 text-sm font-medium text-[var(--app-muted)] transition-colors hover:bg-[var(--app-hover)] hover:text-[var(--app-fg)]"
+              @click="async () => { isLoading = true; await notificationStore.manualRefresh(); isLoading = false; }"
+            >
+              <span class="i-mdi-refresh" />
+            </button>
+            <button
+              v-if="activeTab === 'completed' && notificationStore.dismissedNotifications.length > 0"
+              type="button"
+              class="rounded-lg px-3 py-1.5 text-sm font-medium text-[var(--app-muted)] transition-colors hover:bg-[var(--app-hover)] hover:text-[var(--app-fg)]"
+              @click="handleClearHistory"
+            >
+              <span class="i-mdi-delete-sweep mr-1" />
+              清除已關閉項目
+            </button>
+          </div>
         </div>
 
         <div
@@ -169,13 +208,18 @@ function getStatusBadge(notification: NotificationState): { text: string; class:
           {{ notificationStore.taskActionError }}
         </div>
 
-        <div v-if="visibleNotifications.length === 0" class="p-12 text-center">
+        <div v-if="visibleNotifications.length === 0 && isLoading" class="p-12 text-center">
+          <div class="mx-auto mb-3 text-4xl text-[var(--app-muted-2)] i-mdi-bell-off" />
+          <p class="text-[var(--app-muted)]">載入中...</p>
+        </div>
+
+        <div v-if="visibleNotifications.length === 0 && !isLoading" class="p-12 text-center">
           <div class="mx-auto mb-3 text-4xl text-[var(--app-muted-2)] i-mdi-bell-off" />
           <p class="text-[var(--app-muted)]">
             {{ activeTab === 'active' ? '目前沒有進行中的任務' : '目前沒有已完成任務' }}
           </p>
           <p class="text-sm text-[var(--app-muted-2)]">
-            {{ activeTab === 'active' ? '新的警示與待處理任務會顯示在這裡' : '完成或關閉的任務會顯示在這裡' }}
+            {{ activeTab === 'active' ? '' : '完成或關閉的任務會顯示在這裡' }}
           </p>
         </div>
 
@@ -269,6 +313,8 @@ function getStatusBadge(notification: NotificationState): { text: string; class:
           </div>
         </div>
       </div>
+
+      <SystemSettingsPanel v-if="activeTab === 'settings'" system="lma" />
     </div>
   </div>
 </template>

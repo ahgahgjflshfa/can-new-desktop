@@ -4,12 +4,13 @@ import { useAuthStore } from '@/stores/authStore'
 import { useNotificationStore } from '@/stores/notificationStore'
 import { fetchCanTasks, completeCanTask } from '@/services/canTaskService'
 import { logAppEvent } from '@/services/appLogger'
+import SystemSettingsPanel from '@/components/SystemSettingsPanel.vue'
 import type { CanTask } from '@/types/can'
 
 const authStore = useAuthStore()
 const notificationStore = useNotificationStore()
 const tasks = ref<CanTask[]>([])
-const activeTab = ref<'active' | 'completed'>('active')
+const activeTab = ref<'active' | 'completed' | 'settings'>('active')
 const isLoading = ref(false)
 const error = ref<string | null>(null)
 const isActionPending = ref(false)
@@ -34,8 +35,10 @@ async function loadTasks() {
   try {
     const result = await fetchCanTasks(authStore.token, userStation.value)
     tasks.value = result
+    notificationStore.setCanPollingError(null)
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
+    notificationStore.setCanPollingError(error.value)
     logAppEvent('error', 'can-task-view', 'failed to load tasks', err)
   } finally {
     isLoading.value = false
@@ -45,6 +48,7 @@ async function loadTasks() {
 function startPolling() {
   if (pollInterval) return
   if (!notificationStore.canPollingEnabled) return
+  notificationStore.setCanPollingRuntimeState(true)
   void loadTasks()
   pollInterval = setInterval(() => {
     void loadTasks()
@@ -56,6 +60,7 @@ function stopPolling() {
     clearInterval(pollInterval)
     pollInterval = null
   }
+  notificationStore.setCanPollingRuntimeState(false)
 }
 
 async function handleComplete(serialNumber: number, resolutionType: number) {
@@ -176,18 +181,36 @@ watch(() => notificationStore.canPollingIntervalMs, () => {
             已完成任務
             <span v-if="activeTab === 'completed'" class="absolute inset-x-0 bottom-0 h-1 rounded-full bg-[var(--app-primary)]" />
           </button>
+
+          <button
+            type="button"
+            class="relative whitespace-nowrap px-2 pb-5 pt-4 text-lg font-semibold transition-colors"
+            :class="activeTab === 'settings' ? 'text-[var(--app-primary-strong)]' : 'text-[var(--app-muted)] hover:text-[var(--app-fg)]'"
+            @click="activeTab = 'settings'"
+          >
+            設定
+            <span v-if="activeTab === 'settings'" class="absolute inset-x-0 bottom-0 h-1 rounded-full bg-[var(--app-primary)]" />
+          </button>
         </div>
       </div>
     </div>
 
     <div class="mx-auto max-w-5xl px-6 py-6 md:px-8 md:py-8">
-      <div class="overflow-hidden rounded-[1.5rem] border border-[var(--app-border)] bg-[var(--app-surface)]">
+      <div v-if="activeTab !== 'settings'" class="overflow-hidden rounded-[1.5rem] border border-[var(--app-border)] bg-[var(--app-surface)]">
         <div class="flex items-center justify-between border-b border-[var(--app-border)] p-4">
           <h2 class="flex items-center gap-2 text-xl font-semibold text-[var(--app-fg)]">
             <div class="i-mdi-broom text-[var(--app-primary-strong)]" />
             {{ activeTab === 'active' ? '進行中' : '已完成' }}
           </h2>
-          <div v-if="isLoading" class="text-sm text-[var(--app-muted)]">載入中...</div>
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              class="rounded-lg px-3 py-1.5 text-sm font-medium text-[var(--app-muted)] transition-colors hover:bg-[var(--app-hover)] hover:text-[var(--app-fg)]"
+              @click="loadTasks()"
+            >
+              <span class="i-mdi-refresh" />
+            </button>
+          </div>
         </div>
 
         <div v-if="error" class="mx-4 mt-4 rounded-lg border border-[var(--app-danger)]/20 bg-[var(--app-danger)]/10 px-3 py-2 text-sm text-[var(--app-danger)]">
@@ -198,13 +221,18 @@ watch(() => notificationStore.canPollingIntervalMs, () => {
           {{ actionError }}
         </div>
 
+        <div v-if="visibleTasks.length === 0 && isLoading" class="p-12 text-center">
+          <div class="mx-auto mb-3 text-4xl text-[var(--app-muted-2)] i-mdi-broom" />
+          <p class="text-[var(--app-muted)]">載入中...</p>
+        </div>
+
         <div v-if="visibleTasks.length === 0 && !isLoading" class="p-12 text-center">
           <div class="mx-auto mb-3 text-4xl text-[var(--app-muted-2)] i-mdi-broom" />
           <p class="text-[var(--app-muted)]">
             {{ activeTab === 'active' ? '目前沒有進行中的任務' : '目前沒有已完成任務' }}
           </p>
           <p class="text-sm text-[var(--app-muted-2)]">
-            {{ activeTab === 'active' ? '新的溢滿回報任務會顯示在這裡' : '完成的任務會顯示在這裡' }}
+            {{ activeTab === 'active' ? '' : '完成的任務會顯示在這裡' }}
           </p>
         </div>
 
@@ -275,6 +303,8 @@ watch(() => notificationStore.canPollingIntervalMs, () => {
           </div>
         </div>
       </div>
+
+      <SystemSettingsPanel v-if="activeTab === 'settings'" system="can" />
     </div>
   </div>
 </template>
