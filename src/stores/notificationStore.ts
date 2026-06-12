@@ -45,7 +45,8 @@ function hasLmaAuthToken(): boolean {
   try {
     const parsed = JSON.parse(raw)
     return typeof parsed?.token === 'string' && parsed.token.length > 0
-  } catch {
+  } catch (err) {
+    logAppEvent('warn', 'notifications', 'failed to parse lma auth token from storage', err)
     return false
   }
 }

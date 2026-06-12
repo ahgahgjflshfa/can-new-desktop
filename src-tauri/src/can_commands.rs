@@ -89,11 +89,6 @@ pub async fn can_login(payload: CanLoginRequest) -> Result<CanLoginResponse, Str
         account: payload.account.as_str(),
         password: payload.password.as_str(),
     };
-    let body_json = serde_json::to_string(&body).unwrap_or_default();
-    runtime_log::info(
-        LOG_SOURCE,
-        format!("CAN login request body: {}", body_json).as_str(),
-    );
 
     let response = client
         .post(build_can_api_url("/api/auth/login"))
@@ -117,17 +112,12 @@ pub async fn can_login(payload: CanLoginRequest) -> Result<CanLoginResponse, Str
         e.to_string()
     })?;
 
-    runtime_log::info(
-        LOG_SOURCE,
-        format!("CAN login response body: {}", body_text).as_str(),
-    );
-
     if !status_code.is_success() {
         runtime_log::warn(
             LOG_SOURCE,
-            format!("CAN login failed with status {}: {}", status_code, body_text).as_str(),
+            format!("CAN login failed with status {}", status_code).as_str(),
         );
-        return Err(format!("CAN login failed with status {}: {}", status_code, body_text));
+        return Err(format!("CAN login failed with status {}", status_code));
     }
 
     let data: CanLoginApiData = match serde_json::from_str(&body_text) {
@@ -137,15 +127,12 @@ pub async fn can_login(payload: CanLoginRequest) -> Result<CanLoginResponse, Str
                 Some(d) => d,
                 None => {
                     runtime_log::error(LOG_SOURCE, "CAN login response envelope missing data");
-                    return Err(format!("CAN login response envelope missing data | body: {}", body_text));
+                    return Err("CAN login response envelope missing data".to_string());
                 }
             },
             Err(_) => {
-                runtime_log::error(
-                    LOG_SOURCE,
-                    format!("Failed to decode CAN login response | body: {}", body_text).as_str(),
-                );
-                return Err(format!("Failed to decode CAN login response | body: {}", body_text));
+                runtime_log::error(LOG_SOURCE, "Failed to decode CAN login response");
+                return Err("Failed to decode CAN login response".to_string());
             }
         }
     };
