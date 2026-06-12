@@ -9,6 +9,8 @@ import { logAppEvent } from '@/services/appLogger'
 
 const NOTIFICATION_STORAGE_KEY = 'tauri-app:notifications'
 const SETTINGS_STORAGE_KEY = 'tauri-app:notification-settings'
+const AUTH_STORAGE_KEY = 'tauri-app:auth'
+const LMA_AUTH_STORAGE_KEY = 'tauri-app:auth:lma'
 const MAX_STORED_NOTIFICATIONS = 20
 const DEFAULT_POLLING_INTERVAL = 10000
 const MIN_POLLING_INTERVAL_SECONDS = 5
@@ -33,6 +35,19 @@ function isMainWindowActive(): boolean {
 
   const hasFocus = typeof document.hasFocus === 'function' ? document.hasFocus() : true
   return document.visibilityState === 'visible' && hasFocus
+}
+
+function hasLmaAuthToken(): boolean {
+  if (typeof localStorage === 'undefined') return false
+  const raw = localStorage.getItem(LMA_AUTH_STORAGE_KEY) ?? localStorage.getItem(AUTH_STORAGE_KEY)
+  if (!raw) return false
+
+  try {
+    const parsed = JSON.parse(raw)
+    return typeof parsed?.token === 'string' && parsed.token.length > 0
+  } catch {
+    return false
+  }
 }
 
 interface DismissPayload {
@@ -109,6 +124,8 @@ export const useNotificationStore = defineStore('notifications', {
     pollingIntervalMs: DEFAULT_POLLING_INTERVAL,
     canPollingEnabled: true,
     canPollingIntervalMs: DEFAULT_POLLING_INTERVAL,
+    isCanPolling: false,
+    canPollingLastError: null as string | null,
     pollingStats: {
       lastPollTime: null as Date | null,
       nextPollTime: null as Date | null,
@@ -425,6 +442,19 @@ export const useNotificationStore = defineStore('notifications', {
     },
 
     startPolling() {
+      if (!hasLmaAuthToken()) {
+        this.isPolling = false
+        this.lastError = null
+        this.pollingStats = {
+          ...this.pollingStats,
+          nextPollTime: null,
+          lastError: null,
+          isConnected: false,
+        }
+        logAppEvent('info', 'notifications', 'skipped notification polling because lma is not logged in')
+        return
+      }
+
       const poller = getNotificationPoller()
 
       poller.updateConfig({ intervalMs: this.pollingIntervalMs })
@@ -453,7 +483,23 @@ export const useNotificationStore = defineStore('notifications', {
       const poller = getNotificationPoller()
       poller.stop()
       this.isPolling = false
+      this.lastError = null
+      this.pollingStats = {
+        ...this.pollingStats,
+        nextPollTime: null,
+        lastError: null,
+        isConnected: false,
+      }
       logAppEvent('info', 'notifications', 'stopped notification polling')
+    },
+
+    async manualRefresh() {
+      if (!this.isPolling) {
+        logAppEvent('warn', 'notifications', 'manual refresh skipped because polling is not active')
+        return
+      }
+      const poller = getNotificationPoller()
+      await poller.triggerPoll()
     },
 
     handleNewNotifications(newNotifications: EmergencyNotification[]) {
@@ -752,6 +798,17 @@ export const useNotificationStore = defineStore('notifications', {
       this.canPollingIntervalMs = clampedSeconds * 1000
       this.saveSettings()
       logAppEvent('info', 'notifications', 'updated CAN polling interval', { seconds: clampedSeconds })
+    },
+
+    setCanPollingRuntimeState(isPolling: boolean) {
+      this.isCanPolling = isPolling
+      if (isPolling) {
+        this.canPollingLastError = null
+      }
+    },
+
+    setCanPollingError(error: string | null) {
+      this.canPollingLastError = error
     },
 
     loadFromStorage() {

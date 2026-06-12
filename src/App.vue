@@ -17,7 +17,7 @@ const notificationStore = useNotificationStore()
 const hasInitializedNotifications = ref(false)
 
 async function syncNotificationRuntimeByAuth() {
-  if (authStore.isAuthenticated) {
+  if (systemStore.isLmaAuthenticated) {
     if (!hasInitializedNotifications.value) {
       await notificationStore.init()
       hasInitializedNotifications.value = true

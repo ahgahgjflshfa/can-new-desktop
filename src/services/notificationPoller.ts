@@ -183,6 +183,13 @@ class NotificationPoller {
   getConfig(): NotificationPollerConfig {
     return { ...this.config }
   }
+
+  async triggerPoll(): Promise<void> {
+    if (!this.isPolling || this.isPollInProgress) {
+      return
+    }
+    await this.poll()
+  }
 }
 
 let pollerInstance: NotificationPoller | null = null

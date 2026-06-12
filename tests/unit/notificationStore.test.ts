@@ -77,8 +77,13 @@ describe('notificationStore', () => {
     }
   }
 
+  function storeLmaAuthToken() {
+    localStorage.setItem('tauri-app:auth:lma', JSON.stringify({ token: 'lma-token' }))
+  }
+
   describe('init', () => {
-    test('starts polling by default', async () => {
+    test('starts polling by default when lma is logged in', async () => {
+      storeLmaAuthToken()
       const store = useNotificationStore()
 
       await store.init()
@@ -87,7 +92,18 @@ describe('notificationStore', () => {
       expect(store.isPolling).toBe(true)
     })
 
+    test('does not start polling before lma login', async () => {
+      const store = useNotificationStore()
+
+      await store.init()
+
+      expect(mockPoller.start).not.toHaveBeenCalled()
+      expect(store.isPolling).toBe(false)
+      expect(store.lastError).toBeNull()
+    })
+
     test('clamps invalid persisted polling interval', async () => {
+      storeLmaAuthToken()
       localStorage.setItem(
         'tauri-app:notification-settings',
         JSON.stringify({ pollingEnabled: true, pollingIntervalMs: 0 })
@@ -319,12 +335,23 @@ describe('notificationStore', () => {
   })
 
   describe('setPollingEnabled', () => {
-    test('starts polling when enabled', () => {
+    test('starts polling when enabled and lma is logged in', () => {
+      storeLmaAuthToken()
       const store = useNotificationStore()
 
       store.setPollingEnabled(true)
 
       expect(mockPoller.start).toHaveBeenCalled()
+    })
+
+    test('does not start polling when enabled before lma login', () => {
+      const store = useNotificationStore()
+
+      store.setPollingEnabled(true)
+
+      expect(mockPoller.start).not.toHaveBeenCalled()
+      expect(store.isPolling).toBe(false)
+      expect(store.lastError).toBeNull()
     })
 
     test('stops polling when disabled', () => {
