@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::can_api_client::{build_can_api_client, build_can_api_url, CanApiEnvelope};
+use crate::can_api_client::{CanApiEnvelope, build_can_api_client, build_can_api_url};
 use crate::runtime_log;
 
 const LOG_SOURCE: &str = "can";
@@ -69,6 +69,7 @@ struct CanLoginRequestBody<'a> {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct CanCompleteTaskRequestBody {
     is_done: bool,
     resolution_type: Option<i64>,
@@ -134,16 +135,15 @@ pub async fn can_login(payload: CanLoginRequest) -> Result<CanLoginResponse, Str
                 runtime_log::error(LOG_SOURCE, "Failed to decode CAN login response");
                 return Err("Failed to decode CAN login response".to_string());
             }
-        }
+        },
     };
 
-    let station = data.station
+    let station = data
+        .station
         .or_else(|| parse_jwt_sub(&data.access_token))
         .unwrap_or_else(|| payload.account.clone());
-    let topic = data.topic
-        .unwrap_or_else(|| format!("can_{}", station));
-    let account = data.account
-        .unwrap_or_else(|| payload.account.clone());
+    let topic = data.topic.unwrap_or_else(|| format!("can_{}", station));
+    let account = data.account.unwrap_or_else(|| payload.account.clone());
 
     runtime_log::info(
         LOG_SOURCE,
@@ -165,14 +165,13 @@ pub async fn can_login(payload: CanLoginRequest) -> Result<CanLoginResponse, Str
 }
 
 #[tauri::command]
-pub async fn can_fetch_tasks(token: String, station_code: String) -> Result<Vec<CanTaskItem>, String> {
+pub async fn can_fetch_tasks(
+    token: String,
+    station_code: String,
+) -> Result<Vec<CanTaskItem>, String> {
     runtime_log::info(
         LOG_SOURCE,
-        format!(
-            "Fetching CAN tasks for station '{}'",
-            station_code
-        )
-        .as_str(),
+        format!("Fetching CAN tasks for station '{}'", station_code).as_str(),
     );
     let client = build_can_api_client()?;
     let response = client
@@ -211,7 +210,9 @@ pub async fn can_fetch_tasks(token: String, station_code: String) -> Result<Vec<
         ));
     }
 
-    let items: Vec<CanTaskItem> = if let Ok(tasks) = serde_json::from_str::<Vec<CanTaskItem>>(&body_text) {
+    let items: Vec<CanTaskItem> = if let Ok(tasks) =
+        serde_json::from_str::<Vec<CanTaskItem>>(&body_text)
+    {
         tasks
     } else {
         let envelope: CanApiEnvelope<Vec<CanTaskItem>> = match serde_json::from_str(&body_text) {
@@ -341,4 +342,28 @@ pub async fn can_complete_task(
         format!("Complete CAN task {} succeeded", serial_number).as_str(),
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CanCompleteTaskRequestBody;
+    use serde_json::json;
+
+    #[test]
+    fn serializes_complete_task_body_with_backend_field_names() {
+        let body = CanCompleteTaskRequestBody {
+            is_done: true,
+            resolution_type: Some(1),
+        };
+
+        let serialized = serde_json::to_value(body).expect("serialize CAN complete body");
+
+        assert_eq!(
+            serialized,
+            json!({
+                "isDone": true,
+                "resolutionType": 1,
+            })
+        );
+    }
 }
