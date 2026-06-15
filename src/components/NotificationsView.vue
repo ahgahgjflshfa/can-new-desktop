@@ -22,6 +22,10 @@ const priorityStyles: Record<NotificationPriority, { borderClass: string; iconCl
   ignored: { borderClass: 'border-l-[var(--app-muted-2)]', iconClass: 'i-mdi-eye-off text-[var(--app-muted-2)]' },
 }
 
+function isLmaNotification(notification: NotificationState): boolean {
+  return notification.metadata?.system !== 'can'
+}
+
 function getPriorityStyle(priority: string) {
   if (priority in priorityStyles) {
     return priorityStyles[priority as NotificationPriority]
@@ -63,6 +67,7 @@ function handleComplete(notificationId: string, result: CompletionResult) {
 const activeNotifications = computed(() => {
   return notificationStore.notifications.filter(notification => {
     return (
+      isLmaNotification(notification) &&
       notification.status !== 'dismissed' &&
       (notification.priority === 'pending' || notification.priority === 'replied')
     )
@@ -72,9 +77,10 @@ const activeNotifications = computed(() => {
 const completedNotifications = computed(() => {
   return notificationStore.notifications.filter(notification => {
     return (
-      notification.status === 'dismissed' ||
-      notification.priority === 'completed' ||
-      notification.priority === 'ignored'
+      isLmaNotification(notification) &&
+      (notification.status === 'dismissed' ||
+        notification.priority === 'completed' ||
+        notification.priority === 'ignored')
     )
   })
 })

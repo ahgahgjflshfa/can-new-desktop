@@ -14,6 +14,7 @@ interface NotificationPayload {
   category?: string
   createdAt: string
   unreadCount: number
+  metadata?: Record<string, unknown>
 }
 
 const currentNotification = ref<NotificationPayload | null>(null)
@@ -78,6 +79,7 @@ const priorityBarClass = computed(() => currentPriorityConfig.value.barClass)
 const priorityIconBgClass = computed(() => currentPriorityConfig.value.iconBgClass)
 const priorityBadgeClass = computed(() => currentPriorityConfig.value.badgeClass)
 const primaryButtonClass = computed(() => currentPriorityConfig.value.buttonClass)
+const isCanNotification = computed(() => currentNotification.value?.metadata?.system === 'can')
 
 const formattedTime = computed(() => {
   if (!currentNotification.value) return ''
@@ -99,17 +101,19 @@ async function acknowledgeCurrentAlert() {
   if (!currentNotification.value || isAcknowledging.value) return
 
   const notificationId = currentNotification.value.id
-  const taskId = Number(notificationId)
-  if (!Number.isFinite(taskId)) {
-    acknowledgeError.value = '任務編號無效'
-    return
-  }
 
   isAcknowledging.value = true
   acknowledgeError.value = null
 
   try {
-    await replyTask(taskId)
+    if (!isCanNotification.value) {
+      const taskId = Number(notificationId)
+      if (!Number.isFinite(taskId)) {
+        acknowledgeError.value = '任務編號無效'
+        return
+      }
+      await replyTask(taskId)
+    }
     logAppEvent('info', 'popup', 'popup acknowledge succeeded', { notificationId })
 
     await invoke('emit_dismiss_notification', {

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -11,6 +13,7 @@ pub struct NotificationPayload {
     pub created_at: String,
     #[serde(rename = "unreadCount")]
     pub unread_count: u32,
+    pub metadata: Option<HashMap<String, serde_json::Value>>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
