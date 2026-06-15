@@ -5,6 +5,7 @@ import { getApiAuthToken } from '@/services/apiClient'
 export type CompletionResult = 'normal' | 'no_passenger'
 
 const AUTH_STORAGE_KEY = 'tauri-app:auth'
+const LMA_AUTH_STORAGE_KEY = 'tauri-app:auth:lma'
 const LOG_SOURCE = 'task-actions'
 
 interface StoredAuthState {
@@ -14,7 +15,7 @@ interface StoredAuthState {
 function getTokenFromStorage(): string | null {
   if (typeof localStorage === 'undefined') return null
 
-  const raw = localStorage.getItem(AUTH_STORAGE_KEY)
+  const raw = localStorage.getItem(LMA_AUTH_STORAGE_KEY) ?? localStorage.getItem(AUTH_STORAGE_KEY)
   if (!raw) return null
 
   try {
