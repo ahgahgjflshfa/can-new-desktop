@@ -42,6 +42,8 @@ function mapTaskToNotification(task: TaskItem): EmergencyNotification {
     createdAt: timestampToIso(task.created_at),
     receivedAt: timestampToIso(task.created_at),
     metadata: {
+      system: 'lma',
+      taskId: task.id,
       stationId: task.station_id,
       locationCode: task.location_code,
       repliedAt: task.replied_at,

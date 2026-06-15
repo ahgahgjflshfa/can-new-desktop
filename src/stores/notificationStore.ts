@@ -6,6 +6,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { isTauriRuntime } from '@/tauri/window'
 import { logAppEvent } from '@/services/appLogger'
+import type { CanTask } from '@/types/can'
 
 const NOTIFICATION_STORAGE_KEY = 'tauri-app:notifications'
 const SETTINGS_STORAGE_KEY = 'tauri-app:notification-settings'
@@ -17,6 +18,67 @@ const MIN_POLLING_INTERVAL_SECONDS = 5
 const MAX_POLLING_INTERVAL_SECONDS = 300
 const IN_APP_REMINDER_MS = 4000
 const REPLIED_ESCALATION_MS = 15 * 60 * 1000
+const CAN_NOTIFICATION_CATEGORY = 'Q 潔淨立馬清'
+type NotificationSystem = 'lma' | 'can'
+
+function getCanNotificationId(serialNumber: number | string): string {
+  return `can:${serialNumber}`
+}
+
+function convertCanTaskToNotification(task: CanTask): EmergencyNotification {
+  const createdAt = task.createdAt || new Date(task.informTime).toISOString()
+  return {
+    id: getCanNotificationId(task.serialNumber),
+    title: 'Q 潔淨立馬清任務',
+    body: `${task.station} ${task.trashBin}`,
+    priority: 'pending',
+    category: CAN_NOTIFICATION_CATEGORY,
+    createdAt,
+    receivedAt: new Date().toISOString(),
+    metadata: {
+      system: 'can',
+      serialNumber: task.serialNumber,
+      station: task.station,
+      trashBin: task.trashBin,
+    },
+  }
+}
+
+function notificationBelongsToSystem(notification: EmergencyNotification | NotificationState, system: NotificationSystem): boolean {
+  const notificationSystem = notification.metadata?.system
+  if (system === 'can') {
+    return notificationSystem === 'can'
+  }
+  return notificationSystem !== 'can'
+}
+
+function getNotificationSystem(notification: EmergencyNotification | NotificationState): NotificationSystem {
+  return notification.metadata?.system === 'can' ? 'can' : 'lma'
+}
+
+function getStoredNotificationId(notification: EmergencyNotification, system: NotificationSystem): string {
+  if (system === 'can') {
+    const serialNumber = notification.metadata?.serialNumber
+    return getCanNotificationId(typeof serialNumber === 'number' || typeof serialNumber === 'string' ? serialNumber : notification.id)
+  }
+  return notification.id
+}
+
+function normalizeIncomingNotification(notification: EmergencyNotification, system: NotificationSystem): EmergencyNotification {
+  const metadata: Record<string, unknown> = { ...notification.metadata, system }
+  if (system === 'lma' && metadata.taskId === undefined) {
+    const taskId = Number(notification.id)
+    if (Number.isFinite(taskId)) {
+      metadata.taskId = taskId
+    }
+  }
+
+  return {
+    ...notification,
+    id: getStoredNotificationId(notification, system),
+    metadata,
+  }
+}
 
 let _dismissEventUnlisten: UnlistenFn | null = null
 let _popupClosedEventUnlisten: UnlistenFn | null = null
@@ -302,11 +364,16 @@ export const useNotificationStore = defineStore('notifications', {
       }
     },
 
-    reconcileMissingRemoteTasks(incomingNotifications: EmergencyNotification[]) {
+    reconcileMissingRemoteTasks(incomingNotifications: EmergencyNotification[], system: NotificationSystem) {
       const remoteIds = new Set(incomingNotifications.map(notification => notification.id))
 
       for (const notification of this.notifications) {
-        if (notification.status !== 'dismissed' && this.isTaskUnresolved(notification) && !remoteIds.has(notification.id)) {
+        if (
+          notification.status !== 'dismissed' &&
+          this.isTaskUnresolved(notification) &&
+          notificationBelongsToSystem(notification, system) &&
+          !remoteIds.has(notification.id)
+        ) {
           this.resolveNotificationFromPolling(notification.id)
         }
       }
@@ -503,12 +570,14 @@ export const useNotificationStore = defineStore('notifications', {
       await poller.triggerPoll()
     },
 
-    handleNewNotifications(newNotifications: EmergencyNotification[]) {
+    handleNewNotifications(newNotifications: EmergencyNotification[], system: NotificationSystem = 'lma') {
       if (newNotifications.length > 0) {
         logAppEvent('info', 'notifications', 'received notifications from poller', { count: newNotifications.length })
       }
 
-      for (const notification of newNotifications) {
+      const normalizedNotifications = newNotifications.map(notification => normalizeIncomingNotification(notification, system))
+
+      for (const notification of normalizedNotifications) {
         const existingIndex = this.notifications.findIndex(n => n.id === notification.id)
         if (existingIndex !== -1) {
           const existing = this.notifications[existingIndex]
@@ -533,7 +602,7 @@ export const useNotificationStore = defineStore('notifications', {
         }
       }
 
-      this.reconcileMissingRemoteTasks(newNotifications)
+      this.reconcileMissingRemoteTasks(normalizedNotifications, system)
 
       void this.runReminderCycle().catch(err => {
         logAppEvent('warn', 'notifications', 'reminder cycle failed', err)
@@ -542,6 +611,15 @@ export const useNotificationStore = defineStore('notifications', {
 
       this.pruneOldNotifications()
       this.saveToStorage()
+    },
+
+    handleCanTasks(tasks: CanTask[]) {
+      const unresolvedTasks = tasks.filter(task => !task.isDone)
+      if (unresolvedTasks.length > 0) {
+        logAppEvent('info', 'notifications', 'received CAN tasks from poller', { count: unresolvedTasks.length })
+      }
+
+      this.handleNewNotifications(unresolvedTasks.map(convertCanTaskToNotification), 'can')
     },
 
     async showNotification(notificationId: string) {
@@ -574,6 +652,7 @@ export const useNotificationStore = defineStore('notifications', {
             category: notification.category,
             createdAt: notification.createdAt,
             unreadCount: this.unreadCount,
+            metadata: notification.metadata,
           },
         })
       } catch (err) {
@@ -607,6 +686,14 @@ export const useNotificationStore = defineStore('notifications', {
     },
 
     getTaskId(notificationId: string): number | null {
+      const notification = this.notifications.find(n => n.id === notificationId)
+      if (notification && getNotificationSystem(notification) === 'can') return null
+
+      const metadataTaskId = notification?.metadata?.taskId
+      if (typeof metadataTaskId === 'number' && Number.isFinite(metadataTaskId)) {
+        return metadataTaskId
+      }
+
       const taskId = Number(notificationId)
       return Number.isFinite(taskId) ? taskId : null
     },
@@ -745,25 +832,16 @@ export const useNotificationStore = defineStore('notifications', {
     },
 
     pruneOldNotifications() {
-      if (this.notifications.length <= MAX_STORED_NOTIFICATIONS) {
-        return
-      }
+      const keptBySystem = new Map<NotificationSystem, number>()
 
-      const dismissedToRemove = this.notifications
-        .filter(n => n.status === 'dismissed')
-        .slice(Math.floor(MAX_STORED_NOTIFICATIONS / 2))
+      this.notifications = this.notifications.filter(notification => {
+        const system = getNotificationSystem(notification)
+        const kept = keptBySystem.get(system) ?? 0
+        if (kept >= MAX_STORED_NOTIFICATIONS) return false
 
-      for (const notification of dismissedToRemove) {
-        const index = this.notifications.findIndex(n => n.id === notification.id)
-        if (index !== -1) {
-          this.notifications.splice(index, 1)
-        }
-      }
-
-      if (this.notifications.length > MAX_STORED_NOTIFICATIONS) {
-        const excess = this.notifications.length - MAX_STORED_NOTIFICATIONS
-        this.notifications.splice(-excess, excess)
-      }
+        keptBySystem.set(system, kept + 1)
+        return true
+      })
     },
 
     setPollingEnabled(enabled: boolean) {

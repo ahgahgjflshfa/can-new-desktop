@@ -1,6 +1,10 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
+import { invoke } from '@tauri-apps/api/core'
+import { isTauriRuntime } from '@/tauri/window'
 import { useNotificationStore } from '@/stores/notificationStore'
+import { completeTask, replyTask } from '@/services/taskActionService'
+import type { CanTask } from '@/types/can'
 import type { EmergencyNotification } from '@/types/notification'
 
 // Create a shared mock poller instance that persists across calls
@@ -39,6 +43,11 @@ vi.mock('@tauri-apps/api/event', () => ({
 
 vi.mock('@/tauri/window', () => ({
   isTauriRuntime: vi.fn(() => false),
+}))
+
+vi.mock('@/services/taskActionService', () => ({
+  replyTask: vi.fn(),
+  completeTask: vi.fn(),
 }))
 
 describe('notificationStore', () => {
@@ -193,6 +202,104 @@ describe('notificationStore', () => {
       expect(missing?.status).toBe('dismissed')
       expect(missing?.dismissedAt).toBeDefined()
       expect(store.currentNotification?.id).toBe('2')
+    })
+  })
+
+  describe('handleCanTasks', () => {
+    function createCanTask(overrides: Partial<CanTask> = {}): CanTask {
+      return {
+        serialNumber: 123,
+        station: 'A1',
+        trashBin: '1F 男廁',
+        isDone: false,
+        cleanAt: null,
+        informTime: 0,
+        resolutionType: 0,
+        visitorID: null,
+        isDisable: false,
+        createdAt: '2026-06-12T05:00:00.000Z',
+        updatedAt: '2026-06-12T05:00:00.000Z',
+        ...overrides,
+      }
+    }
+
+    test('shows a popup notification for new unresolved CAN tasks', async () => {
+      vi.mocked(isTauriRuntime).mockReturnValue(true)
+      vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+      const store = useNotificationStore()
+
+      store.handleCanTasks([createCanTask()])
+      await Promise.resolve()
+
+      expect(store.currentNotification?.id).toBe('can:123')
+      expect(store.currentNotification?.metadata?.system).toBe('can')
+      expect(invoke).toHaveBeenCalledWith('show_alert_popup', {
+        notification: expect.objectContaining({
+          id: 'can:123',
+          title: 'Q 潔淨立馬清任務',
+          category: 'Q 潔淨立馬清',
+          metadata: expect.objectContaining({ system: 'can', serialNumber: 123 }),
+        }),
+      })
+    })
+
+    test('does not create popup notifications for completed CAN tasks', () => {
+      const store = useNotificationStore()
+
+      store.handleCanTasks([createCanTask({ isDone: true, resolutionType: 1 })])
+
+      expect(store.notifications).toHaveLength(0)
+      expect(store.currentNotification).toBeNull()
+    })
+
+    test('does not dismiss lma notifications when CAN polling reports no tasks', () => {
+      const store = useNotificationStore()
+      store.handleNewNotifications([createMockNotification({ id: '42', metadata: { system: 'lma' } })])
+
+      store.handleCanTasks([])
+
+      expect(store.notifications[0]?.status).toBe('shown')
+      expect(store.currentNotification?.id).toBe('42')
+    })
+
+    test('keeps lma and CAN notifications with the same numeric backend id separate', () => {
+      const store = useNotificationStore()
+
+      store.handleNewNotifications([createMockNotification({ id: '123', metadata: { system: 'lma', taskId: 123 } })])
+      store.handleCanTasks([createCanTask({ serialNumber: 123 })])
+
+      expect(store.notifications.map(notification => notification.id).sort()).toEqual(['123', 'can:123'])
+      expect(store.notifications.find(notification => notification.id === '123')?.metadata?.system).toBe('lma')
+      expect(store.notifications.find(notification => notification.id === 'can:123')?.metadata?.system).toBe('can')
+    })
+
+    test('prunes stored notifications per system', () => {
+      const store = useNotificationStore()
+      const lmaNotifications = Array.from({ length: 25 }, (_, index) =>
+        createMockNotification({ id: String(index + 1), metadata: { system: 'lma', taskId: index + 1 } })
+      )
+      const canTasks = Array.from({ length: 25 }, (_, index) => createCanTask({ serialNumber: index + 1 }))
+
+      store.handleNewNotifications(lmaNotifications)
+      store.handleCanTasks(canTasks)
+
+      const lmaCount = store.notifications.filter(notification => notification.metadata?.system !== 'can').length
+      const canCount = store.notifications.filter(notification => notification.metadata?.system === 'can').length
+      expect(lmaCount).toBe(20)
+      expect(canCount).toBe(20)
+      expect(store.notifications).toHaveLength(40)
+    })
+
+    test('does not send CAN notifications through lma task actions', async () => {
+      const store = useNotificationStore()
+      store.handleCanTasks([createCanTask({ serialNumber: 123 })])
+
+      await store.replyTaskById('can:123')
+      await store.completeTaskById('can:123', 'normal')
+
+      expect(replyTask).not.toHaveBeenCalled()
+      expect(completeTask).not.toHaveBeenCalled()
+      expect(store.taskActionError).toBe('任務編號無效')
     })
   })
 

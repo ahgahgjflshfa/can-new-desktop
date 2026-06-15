@@ -35,6 +35,7 @@ async function loadTasks() {
   try {
     const result = await fetchCanTasks(authStore.token, userStation.value)
     tasks.value = result
+    notificationStore.handleCanTasks(result)
     notificationStore.setCanPollingError(null)
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
@@ -74,6 +75,7 @@ async function handleComplete(serialNumber: number, resolutionType: number) {
       task.isDone = true
       task.resolutionType = resolutionType
     }
+    notificationStore.resolveNotificationFromPolling(`can:${serialNumber}`, 'completed')
   } catch (err) {
     actionError.value = err instanceof Error ? err.message : String(err)
     logAppEvent('error', 'can-task-view', 'failed to complete task', err)
