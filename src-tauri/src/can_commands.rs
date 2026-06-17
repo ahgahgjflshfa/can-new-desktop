@@ -304,25 +304,38 @@ pub async fn can_complete_task(
         format!("Complete CAN task response body: {}", body_text).as_str(),
     );
 
-    let envelope: CanApiEnvelope<serde_json::Value> = match serde_json::from_str(&body_text) {
-        Ok(v) => v,
-        Err(e) => {
-            runtime_log::error(
+    // The CAN complete-task API may return either:
+    //   1. A flat CanTaskItem (current observed behavior)
+    //   2. A wrapped CanApiEnvelope<CanTaskItem>
+    // Try envelope first (so we can detect non-success status), then flat.
+    if let Ok(envelope) = serde_json::from_str::<CanApiEnvelope<CanTaskItem>>(&body_text) {
+        if !status_code.is_success() || envelope.status != "success" {
+            let message = envelope
+                .message
+                .unwrap_or_else(|| format!("Complete CAN task failed with status {}", status_code));
+            runtime_log::warn(
                 LOG_SOURCE,
                 format!(
-                    "Failed decoding complete CAN task response body: {} | body: {}",
-                    e, body_text
+                    "Complete CAN task {} rejected with status {}: {}",
+                    serial_number, status_code, message
                 )
                 .as_str(),
             );
-            return Err(format!(
-                "Failed decoding complete CAN task response body: {} | body: {}",
-                e, body_text
-            ));
+            return Err(message);
         }
-    };
-
-    if !status_code.is_success() || envelope.status != "success" {
+    } else if let Ok(_task) = serde_json::from_str::<CanTaskItem>(&body_text) {
+        if !status_code.is_success() {
+            runtime_log::warn(
+                LOG_SOURCE,
+                format!(
+                    "Complete CAN task {} returned task object but HTTP {}",
+                    serial_number, status_code
+                )
+                .as_str(),
+            );
+            return Err(format!("Complete CAN task failed with status {}", status_code));
+        }
+    } else if let Ok(envelope) = serde_json::from_str::<CanApiEnvelope<serde_json::Value>>(&body_text) {
         let message = envelope
             .message
             .unwrap_or_else(|| format!("Complete CAN task failed with status {}", status_code));
@@ -335,6 +348,19 @@ pub async fn can_complete_task(
             .as_str(),
         );
         return Err(message);
+    } else {
+        runtime_log::error(
+            LOG_SOURCE,
+            format!(
+                "Failed decoding complete CAN task response body | body: {}",
+                body_text
+            )
+            .as_str(),
+        );
+        return Err(format!(
+            "Failed decoding complete CAN task response body | body: {}",
+            body_text
+        ));
     }
 
     runtime_log::info(

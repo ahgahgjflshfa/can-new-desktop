@@ -158,66 +158,65 @@ onUnmounted(() => {
 <template>
   <div
     v-if="currentNotification"
-    class="h-screen w-screen flex flex-col overflow-hidden select-none bg-[var(--app-bg)] text-[var(--app-fg)] font-sans antialiased"
+    class="h-screen w-screen flex flex-col overflow-hidden select-none bg-[var(--app-surface)] text-[var(--app-fg)] font-sans antialiased"
   >
-    <!-- Priority indicator bar -->
-    <div class="shrink-0 h-1.5" :class="priorityBarClass" />
-
-    <!-- Header -->
-    <div class="shrink-0 border-b border-[var(--app-border)] bg-[var(--app-surface)] px-5 py-4">
-      <div class="flex items-center gap-3">
-        <div
-          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full"
-          :class="priorityIconBgClass"
-        >
-          <span :class="[currentPriorityConfig.iconClass, 'text-xl']" />
-        </div>
-        <div class="min-w-0 flex-1">
-          <div class="flex flex-wrap items-center gap-2">
-            <span
-              class="rounded-full px-2.5 py-0.5 text-xs font-bold uppercase tracking-wider"
-              :class="priorityBadgeClass"
-            >
-              {{ currentPriorityConfig.label }}
-            </span>
-            <span
-              v-if="currentNotification.category"
-              class="rounded-full px-2 py-0.5 text-xs font-medium bg-[var(--app-surface-2)] text-[var(--app-muted)]"
-            >
-              {{ currentNotification.category }}
-            </span>
-          </div>
-        </div>
-      </div>
-    </div>
+    <!-- Priority indicator bar — thicker for pending to convey urgency -->
+    <div
+      class="shrink-0"
+      :class="[priorityBarClass, currentNotification.priority === 'pending' ? 'h-1' : 'h-[3px]']"
+    />
 
     <!-- Content -->
-    <div class="flex-1 overflow-y-auto bg-[var(--app-surface-3)] p-5">
-      <h2 class="text-[1.25rem] font-bold text-[var(--app-fg-strong)] mb-2 leading-tight">
-        {{ currentNotification.title }}
-      </h2>
-
-      <p class="text-[0.95rem] text-[var(--app-muted)] leading-relaxed">
-        {{ currentNotification.body }}
-      </p>
-
-      <div class="mt-4 flex items-center gap-4 text-xs text-[var(--app-muted-2)]">
-        <span class="flex items-center gap-1">
-          <span class="i-mdi-clock-outline" />
+    <div class="flex-1 overflow-y-auto px-4 pt-3 pb-2 min-h-0">
+      <!-- Status row: priority + category + timestamp -->
+      <div class="flex items-center justify-between gap-2 mb-2">
+        <div class="flex items-center gap-1.5 shrink-0">
+          <span
+            class="inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[4px] text-[11px]"
+            :class="priorityIconBgClass"
+          >
+            <span :class="currentPriorityConfig.iconClass" />
+          </span>
+          <span
+            class="text-[11px] font-semibold whitespace-nowrap rounded-[3px] px-1.5 py-px"
+            :class="priorityBadgeClass"
+          >
+            {{ currentPriorityConfig.label }}
+          </span>
+          <span
+            v-if="currentNotification.category"
+            class="text-[11px] text-[var(--app-muted-2)] whitespace-nowrap"
+          >
+            · {{ currentNotification.category }}
+          </span>
+        </div>
+        <span class="flex items-center gap-1 text-[11px] text-[var(--app-muted-2)] truncate">
+          <span class="i-mdi-clock-outline text-[11px]" />
           {{ formattedTime }}
         </span>
       </div>
 
-      <div class="mt-2 text-xs font-medium uppercase tracking-[0.16em] text-[var(--app-primary-strong)]">
+      <!-- Title — strong visual weight -->
+      <h2 class="text-[1.3rem] font-bold text-[var(--app-fg-strong)] leading-tight mb-1 line-clamp-2">
+        {{ currentNotification.title }}
+      </h2>
+
+      <!-- Body — compact, clamped -->
+      <p class="text-[0.85rem] text-[var(--app-muted)] leading-relaxed line-clamp-3">
+        {{ currentNotification.body }}
+      </p>
+
+      <!-- Unread count -->
+      <div class="mt-2 text-[11px] font-semibold text-[var(--app-primary-strong)]">
         {{ currentNotification.unreadCount }} 筆待處理
       </div>
     </div>
 
-    <!-- Action buttons -->
-    <div class="shrink-0 border-t border-[var(--app-border)] bg-[var(--app-surface)] p-4 space-y-2.5">
+    <!-- Action area -->
+    <div class="shrink-0 border-t border-[var(--app-border)] px-4 pt-3 pb-3 space-y-1.5">
       <button
         type="button"
-        class="w-full h-11 rounded-full text-sm font-bold tracking-wide text-white transition-all shadow-[0_4px_12px_rgba(0,0,0,0.12)] disabled:opacity-60 disabled:cursor-not-allowed disabled:shadow-none"
+        class="w-full h-10 rounded-lg text-[13px] font-bold text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         :class="primaryButtonClass"
         :disabled="isAcknowledging"
         @click="acknowledgeCurrentAlert"
@@ -228,27 +227,30 @@ onUnmounted(() => {
 
       <button
         type="button"
-        class="w-full h-11 rounded-full text-sm font-bold tracking-wide text-[var(--app-primary-strong)] bg-[var(--app-primary-surface)] hover:bg-[var(--app-accent)] transition-colors"
+        class="w-full h-8 text-[12px] font-medium text-[var(--app-muted)] hover:text-[var(--app-primary-strong)] transition-colors flex items-center justify-center gap-1"
         @click="openMainWindow"
       >
-        <span class="i-mdi-open-in-new mr-1.5" />
         開啟主程式以回覆／完成任務
+        <span class="i-mdi-open-in-new text-[12px]" />
       </button>
 
       <p
         v-if="acknowledgeError"
-        class="rounded-xl border border-[color:rgba(196,91,91,0.35)] bg-[color:rgba(196,91,91,0.08)] px-3 py-2 text-xs text-[var(--app-danger)]"
+        class="rounded-md border border-[color:rgba(196,91,91,0.3)] bg-[color:rgba(196,91,91,0.06)] px-2.5 py-1.5 text-[11px] text-[var(--app-danger)]"
       >
         {{ acknowledgeError }}
       </p>
     </div>
   </div>
 
-  <!-- Loading/empty state -->
-  <div v-else class="h-screen w-screen flex items-center justify-center bg-[var(--app-bg)]">
+  <!-- Empty state — intentional monitoring indicator -->
+  <div v-else class="h-screen w-screen flex items-center justify-center bg-[var(--app-surface)]">
     <div class="text-center">
-      <div class="mx-auto mb-3 text-4xl text-[var(--app-muted-2)] i-mdi-bell-off" />
-      <p class="text-[var(--app-muted)] text-sm">等待警示中…</p>
+      <div class="relative mx-auto mb-3 h-2 w-2">
+        <div class="absolute inset-0 rounded-full bg-[var(--app-primary)] animate-ping opacity-60" />
+        <div class="relative h-2 w-2 rounded-full bg-[var(--app-primary)]" />
+      </div>
+      <p class="text-[var(--app-muted-2)] text-[13px]">等待警示中…</p>
     </div>
   </div>
 </template>
