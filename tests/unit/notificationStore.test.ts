@@ -1,4 +1,4 @@
-import { describe, test, expect, vi, beforeEach } from 'vitest'
+import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
 import { isTauriRuntime } from '@/tauri/window'
@@ -54,6 +54,11 @@ describe('notificationStore', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+    vi.mocked(isTauriRuntime).mockReturnValue(false)
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    })
 
     // Mock localStorage
     const storage: Record<string, string> = {}
@@ -71,6 +76,10 @@ describe('notificationStore', () => {
         }
       }),
     })
+  })
+
+  afterEach(() => {
+    useNotificationStore().teardown()
   })
 
   function createMockNotification(overrides: Partial<EmergencyNotification> = {}): EmergencyNotification {
@@ -155,6 +164,44 @@ describe('notificationStore', () => {
 
       expect(store.currentNotification).not.toBeNull()
       expect(store.currentNotification?.id).toBe(notification.id)
+    })
+
+    test('shows popup after the main window loses focus for an already-shown notification', async () => {
+      vi.mocked(isTauriRuntime).mockReturnValue(true)
+      vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+      const store = useNotificationStore()
+      store.setupWindowFocusListener()
+
+      store.handleNewNotifications([createMockNotification({ id: 'focus-test' })])
+
+      expect(store.currentNotification?.id).toBe('focus-test')
+      expect(store.isPopupVisible).toBe(false)
+      expect(invoke).not.toHaveBeenCalledWith('show_alert_popup', expect.anything())
+
+      vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+      window.dispatchEvent(new Event('blur'))
+      await Promise.resolve()
+      await Promise.resolve()
+
+      expect(invoke).toHaveBeenCalledWith('show_alert_popup', {
+        notification: expect.objectContaining({ id: 'focus-test' }),
+      })
+      expect(store.isPopupVisible).toBe(true)
+    })
+
+    test('resets notification state when showing the popup fails', async () => {
+      vi.mocked(isTauriRuntime).mockReturnValue(true)
+      vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+      vi.mocked(invoke).mockRejectedValueOnce(new Error('popup failed'))
+      const store = useNotificationStore()
+
+      store.handleNewNotifications([createMockNotification({ id: 'popup-error' })])
+      await Promise.resolve()
+      await Promise.resolve()
+
+      expect(store.currentNotification).toBeNull()
+      expect(store.isPopupVisible).toBe(false)
+      expect(store.notifications.find(notification => notification.id === 'popup-error')?.status).toBe('pending')
     })
 
     test('queues subsequent notifications', () => {

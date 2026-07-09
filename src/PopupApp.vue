@@ -2,7 +2,6 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
-import { replyTask } from '@/services/taskActionService'
 import { logAppEvent } from '@/services/appLogger'
 import type { NotificationPriority } from '@/types/notification'
 
@@ -18,9 +17,46 @@ interface NotificationPayload {
 }
 
 const currentNotification = ref<NotificationPayload | null>(null)
-const isAcknowledging = ref(false)
-const acknowledgeError = ref<string | null>(null)
 let unlistenShow: UnlistenFn | null = null
+
+function playNotificationSound() {
+  if (typeof window === 'undefined') return
+
+  const AudioContextConstructor = window.AudioContext
+  if (!AudioContextConstructor) {
+    logAppEvent('warn', 'popup', 'notification sound unavailable because AudioContext is unsupported')
+    return
+  }
+
+  try {
+    const audioContext = new AudioContextConstructor()
+    const oscillator = audioContext.createOscillator()
+    const gain = audioContext.createGain()
+    const now = audioContext.currentTime
+
+    oscillator.type = 'sine'
+    oscillator.frequency.setValueAtTime(880, now)
+    oscillator.frequency.setValueAtTime(660, now + 0.12)
+
+    gain.gain.setValueAtTime(0.0001, now)
+    gain.gain.exponentialRampToValueAtTime(0.18, now + 0.02)
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.35)
+
+    oscillator.connect(gain)
+    gain.connect(audioContext.destination)
+
+    oscillator.start(now)
+    oscillator.stop(now + 0.36)
+
+    oscillator.addEventListener('ended', () => {
+      void audioContext.close().catch(err => {
+        logAppEvent('warn', 'popup', 'failed to close notification sound audio context', err)
+      })
+    })
+  } catch (err) {
+    logAppEvent('warn', 'popup', 'failed to play notification sound', err)
+  }
+}
 
 const priorityConfig: Record<
   NotificationPriority,
@@ -30,7 +66,6 @@ const priorityConfig: Record<
     iconBgClass: string
     badgeClass: string
     label: string
-    buttonClass: string
   }
 > = {
   pending: {
@@ -39,7 +74,6 @@ const priorityConfig: Record<
     iconBgClass: 'bg-[color:rgba(196,91,91,0.12)] text-[var(--app-danger)]',
     badgeClass: 'bg-[color:rgba(196,91,91,0.14)] text-[var(--app-danger)]',
     label: '待處理',
-    buttonClass: 'bg-[var(--app-danger)] hover:bg-[color:#b04a4a]',
   },
   replied: {
     barClass: 'bg-[var(--app-warning)]',
@@ -47,7 +81,6 @@ const priorityConfig: Record<
     iconBgClass: 'bg-[color:rgba(212,139,42,0.12)] text-[var(--app-warning)]',
     badgeClass: 'bg-[color:rgba(212,139,42,0.14)] text-[var(--app-warning)]',
     label: '已回覆',
-    buttonClass: 'bg-[var(--app-warning)] hover:bg-[color:#c07d24]',
   },
   completed: {
     barClass: 'bg-[var(--app-success)]',
@@ -55,7 +88,6 @@ const priorityConfig: Record<
     iconBgClass: 'bg-[color:rgba(63,143,107,0.12)] text-[var(--app-success)]',
     badgeClass: 'bg-[color:rgba(63,143,107,0.14)] text-[var(--app-success)]',
     label: '已完成',
-    buttonClass: 'bg-[var(--app-success)] hover:bg-[color:#367a5c]',
   },
   ignored: {
     barClass: 'bg-[var(--app-muted-2)]',
@@ -63,7 +95,6 @@ const priorityConfig: Record<
     iconBgClass: 'bg-[color:rgba(147,143,153,0.12)] text-[var(--app-muted-2)]',
     badgeClass: 'bg-[color:rgba(147,143,153,0.14)] text-[var(--app-muted-2)]',
     label: '已忽略',
-    buttonClass: 'bg-[var(--app-muted-2)] hover:bg-[var(--app-muted)]',
   },
 }
 
@@ -78,8 +109,6 @@ const currentPriorityConfig = computed(() => {
 const priorityBarClass = computed(() => currentPriorityConfig.value.barClass)
 const priorityIconBgClass = computed(() => currentPriorityConfig.value.iconBgClass)
 const priorityBadgeClass = computed(() => currentPriorityConfig.value.badgeClass)
-const primaryButtonClass = computed(() => currentPriorityConfig.value.buttonClass)
-const isCanNotification = computed(() => currentNotification.value?.metadata?.system === 'can')
 
 const formattedTime = computed(() => {
   if (!currentNotification.value) return ''
@@ -97,43 +126,12 @@ async function openMainWindow() {
   await invoke('show_emergency_window')
 }
 
-async function acknowledgeCurrentAlert() {
-  if (!currentNotification.value || isAcknowledging.value) return
-
-  const notificationId = currentNotification.value.id
-
-  isAcknowledging.value = true
-  acknowledgeError.value = null
-
-  try {
-    if (!isCanNotification.value) {
-      const taskId = Number(notificationId)
-      if (!Number.isFinite(taskId)) {
-        acknowledgeError.value = '任務編號無效'
-        return
-      }
-      await replyTask(taskId)
-    }
-    logAppEvent('info', 'popup', 'popup acknowledge succeeded', { notificationId })
-
-    await invoke('emit_dismiss_notification', {
-      notificationId,
-      dismissAll: false,
-    })
-  } catch (err) {
-    acknowledgeError.value = err instanceof Error ? err.message : String(err)
-    logAppEvent('error', 'popup', 'popup acknowledge failed', err)
-  } finally {
-    isAcknowledging.value = false
-  }
-}
-
 onMounted(async () => {
   unlistenShow = await listen<NotificationPayload>('show-notification', event => {
     console.log('[Popup] Received show-notification event:', event.payload)
     logAppEvent('info', 'popup', 'received show-notification event', event.payload)
-    acknowledgeError.value = null
     currentNotification.value = event.payload
+    playNotificationSound()
   })
 
   try {
@@ -143,6 +141,7 @@ onMounted(async () => {
     if (pending) {
       logAppEvent('info', 'popup', 'loaded pending notification on mount', { notificationId: pending.id })
       currentNotification.value = pending
+      playNotificationSound()
     }
   } catch (err) {
     logAppEvent('warn', 'popup', 'failed to get pending notification', err)
@@ -213,33 +212,15 @@ onUnmounted(() => {
     </div>
 
     <!-- Action area -->
-    <div class="shrink-0 border-t border-[var(--app-border)] px-4 pt-3 pb-3 space-y-1.5">
+    <div class="shrink-0 border-t border-[var(--app-border)] px-4 pt-3 pb-3">
       <button
         type="button"
-        class="w-full h-10 rounded-lg text-[13px] font-bold text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        :class="primaryButtonClass"
-        :disabled="isAcknowledging"
-        @click="acknowledgeCurrentAlert"
-      >
-        <span class="i-mdi-check-bold mr-1.5" />
-        {{ isAcknowledging ? '確認中…' : '確認收到' }}
-      </button>
-
-      <button
-        type="button"
-        class="w-full h-8 text-[12px] font-medium text-[var(--app-muted)] hover:text-[var(--app-primary-strong)] transition-colors flex items-center justify-center gap-1"
+        class="w-full h-10 rounded-lg bg-[var(--app-primary)] text-[13px] font-bold text-white transition-colors hover:bg-[var(--app-primary-strong)] flex items-center justify-center gap-1.5"
         @click="openMainWindow"
       >
-        開啟主程式以回覆／完成任務
-        <span class="i-mdi-open-in-new text-[12px]" />
+        開啟主程式
+        <span class="i-mdi-open-in-new text-[13px]" />
       </button>
-
-      <p
-        v-if="acknowledgeError"
-        class="rounded-md border border-[color:rgba(196,91,91,0.3)] bg-[color:rgba(196,91,91,0.06)] px-2.5 py-1.5 text-[11px] text-[var(--app-danger)]"
-      >
-        {{ acknowledgeError }}
-      </p>
     </div>
   </div>
 

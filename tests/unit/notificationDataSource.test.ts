@@ -8,6 +8,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 }))
 
 const LMA_AUTH_STORAGE_KEY = 'tauri-app:auth:lma'
+const AUTH_STORAGE_KEY = 'tauri-app:auth'
 
 describe('notificationDataSource', () => {
   beforeEach(() => {
@@ -17,6 +18,7 @@ describe('notificationDataSource', () => {
 
   afterEach(() => {
     localStorage.removeItem(LMA_AUTH_STORAGE_KEY)
+    localStorage.removeItem(AUTH_STORAGE_KEY)
   })
 
   test('does not map missing task timestamps to current time', async () => {
@@ -38,5 +40,15 @@ describe('notificationDataSource', () => {
 
     expect(response.notifications[0]?.createdAt).toBe('1970-01-01T00:00:00.000Z')
     expect(response.notifications[0]?.receivedAt).toBe('1970-01-01T00:00:00.000Z')
+  })
+
+  test('falls back to the legacy auth storage key when fetching LMA tasks', async () => {
+    localStorage.removeItem(LMA_AUTH_STORAGE_KEY)
+    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({ token: 'legacy-lma-token' }))
+    invokeMock.mockResolvedValue([])
+
+    await fetchNotifications()
+
+    expect(invokeMock).toHaveBeenCalledWith('fetch_tasks', { token: 'legacy-lma-token' })
   })
 })

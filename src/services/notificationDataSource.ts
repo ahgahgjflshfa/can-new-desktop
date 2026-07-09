@@ -53,10 +53,11 @@ function mapTaskToNotification(task: TaskItem): EmergencyNotification {
 }
 
 const LMA_AUTH_STORAGE_KEY = 'tauri-app:auth:lma'
+const AUTH_STORAGE_KEY = 'tauri-app:auth'
 
 function getLmaAuthToken(): string | null {
   if (typeof localStorage === 'undefined') return null
-  const raw = localStorage.getItem(LMA_AUTH_STORAGE_KEY)
+  const raw = localStorage.getItem(LMA_AUTH_STORAGE_KEY) ?? localStorage.getItem(AUTH_STORAGE_KEY)
   if (!raw) return null
   try {
     const parsed = JSON.parse(raw)

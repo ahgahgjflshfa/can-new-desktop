@@ -83,6 +83,7 @@ function normalizeIncomingNotification(notification: EmergencyNotification, syst
 let _dismissEventUnlisten: UnlistenFn | null = null
 let _popupClosedEventUnlisten: UnlistenFn | null = null
 let _windowFocusHandler: (() => void) | null = null
+let _windowBlurHandler: (() => void) | null = null
 let inAppReminderTimeoutId: ReturnType<typeof setTimeout> | null = null
 
 function clearInAppReminderTimeout(): void {
@@ -489,7 +490,16 @@ export const useNotificationStore = defineStore('notifications', {
           this.hidePopup()
         }
       }
+      _windowBlurHandler = () => {
+        if (this.currentNotification) {
+          void this.runReminderCycle().catch(err => {
+            logAppEvent('warn', 'notifications', 'reminder cycle after window blur failed', err)
+            console.warn('Reminder cycle after window blur failed:', err)
+          })
+        }
+      }
       window.addEventListener('focus', _windowFocusHandler)
+      window.addEventListener('blur', _windowBlurHandler)
     },
 
     teardown() {
@@ -506,6 +516,10 @@ export const useNotificationStore = defineStore('notifications', {
       if (_windowFocusHandler) {
         window.removeEventListener('focus', _windowFocusHandler)
         _windowFocusHandler = null
+      }
+      if (_windowBlurHandler) {
+        window.removeEventListener('blur', _windowBlurHandler)
+        _windowBlurHandler = null
       }
     },
 
@@ -636,7 +650,10 @@ export const useNotificationStore = defineStore('notifications', {
 
       if (!isTauriRuntime()) return
 
-      if (isMainWindowActive()) return
+      if (isMainWindowActive()) {
+        this.isPopupVisible = false
+        return
+      }
 
       try {
         logAppEvent('info', 'notifications', 'showing alert popup', {
@@ -656,6 +673,11 @@ export const useNotificationStore = defineStore('notifications', {
           },
         })
       } catch (err) {
+        notification.status = 'pending'
+        if (this.currentNotification?.id === notification.id) {
+          this.currentNotification = null
+        }
+        this.isPopupVisible = false
         logAppEvent('warn', 'notifications', 'failed to show alert popup', err)
         console.warn('Failed to show alert popup:', err)
       }
