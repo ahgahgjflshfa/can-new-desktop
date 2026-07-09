@@ -108,6 +108,8 @@ pub async fn show_emergency_window(app: tauri::AppHandle) -> Result<(), String> 
             "show_emergency_window called but main window was not available",
         );
     }
-    crate::popup_commands::hide_alert_popup(app).await.map_err(|e| e.to_string())?;
+    crate::popup_commands::hide_alert_popup(app)
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(())
 }

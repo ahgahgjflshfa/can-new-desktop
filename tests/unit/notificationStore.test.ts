@@ -3,6 +3,7 @@ import { setActivePinia, createPinia } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
 import { isTauriRuntime } from '@/tauri/window'
 import { useNotificationStore } from '@/stores/notificationStore'
+import { useSystemStore } from '@/stores/systemStore'
 import { completeTask, replyTask } from '@/services/taskActionService'
 import type { CanTask } from '@/types/can'
 import type { EmergencyNotification } from '@/types/notification'
@@ -169,6 +170,7 @@ describe('notificationStore', () => {
     test('shows popup after the main window loses focus for an already-shown notification', async () => {
       vi.mocked(isTauriRuntime).mockReturnValue(true)
       vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+      useSystemStore().switchView('lma')
       const store = useNotificationStore()
       store.setupWindowFocusListener()
 
@@ -187,6 +189,37 @@ describe('notificationStore', () => {
         notification: expect.objectContaining({ id: 'focus-test' }),
       })
       expect(store.isPopupVisible).toBe(true)
+    })
+
+    test('shows popup for cross-system notifications even when the app is focused', async () => {
+      vi.mocked(isTauriRuntime).mockReturnValue(true)
+      vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+      useSystemStore().switchView('can')
+      const store = useNotificationStore()
+
+      store.handleNewNotifications([createMockNotification({ id: 'cross-system-lma' })])
+      await Promise.resolve()
+
+      expect(invoke).toHaveBeenCalledWith('show_alert_popup', {
+        notification: expect.objectContaining({
+          id: 'cross-system-lma',
+          metadata: expect.objectContaining({ system: 'lma' }),
+        }),
+      })
+      expect(store.isPopupVisible).toBe(true)
+    })
+
+    test('keeps popup hidden for same-system notifications while the app is focused', async () => {
+      vi.mocked(isTauriRuntime).mockReturnValue(true)
+      vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+      useSystemStore().switchView('lma')
+      const store = useNotificationStore()
+
+      store.handleNewNotifications([createMockNotification({ id: 'same-system-lma' })])
+      await Promise.resolve()
+
+      expect(invoke).not.toHaveBeenCalledWith('show_alert_popup', expect.anything())
+      expect(store.isPopupVisible).toBe(false)
     })
 
     test('resets notification state when showing the popup fails', async () => {

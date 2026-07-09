@@ -12,6 +12,32 @@ const CAN_AUTH_STORAGE_KEY = 'tauri-app:auth:can'
 
 type SystemType = 'lma' | 'can'
 
+function getLoginErrorMessage(err: unknown): string {
+  const rawMessage = err instanceof Error ? err.message : String(err ?? '')
+  const message = rawMessage.toLowerCase()
+
+  if (!rawMessage.trim()) return '登入失敗，請稍後再試。'
+  if (/[^\x00-\x7F]/.test(rawMessage)) return rawMessage
+
+  if (message.includes('invalid') || message.includes('credential') || message.includes('unauthorized')) {
+    return '帳號或密碼錯誤，請重新輸入。'
+  }
+
+  if (message.includes('forbidden') || message.includes('permission')) {
+    return '此帳號沒有登入權限，請聯絡管理員。'
+  }
+
+  if (message.includes('timeout') || message.includes('timed out')) {
+    return '登入逾時，請確認網路連線後再試。'
+  }
+
+  if (message.includes('network') || message.includes('fetch') || message.includes('connection')) {
+    return '無法連線到伺服器，請確認網路後再試。'
+  }
+
+  return '登入失敗，請確認帳號密碼或稍後再試。'
+}
+
 interface LmaStoredAuthState {
   token: string
   user: AuthUser
@@ -36,6 +62,10 @@ export const useAuthStore = defineStore('auth', {
     isAuthenticated: state => Boolean(state.token),
     displayName: state => state.user?.name ?? '',
     isSystemAuthenticated: state => (system: SystemType) => {
+      if (system === state.currentSystem) {
+        return Boolean(state.token)
+      }
+
       if (typeof localStorage === 'undefined') return false
       const key = system === 'lma' ? LMA_AUTH_STORAGE_KEY : CAN_AUTH_STORAGE_KEY
       const raw = localStorage.getItem(key)
@@ -43,7 +73,14 @@ export const useAuthStore = defineStore('auth', {
         // backward compatibility: check old key for lma
         if (system === 'lma') {
           const oldRaw = localStorage.getItem(AUTH_STORAGE_KEY)
-          if (oldRaw) return true
+          if (oldRaw) {
+            try {
+              const parsed = JSON.parse(oldRaw)
+              return typeof parsed?.token === 'string' && parsed.token.length > 0
+            } catch {
+              return false
+            }
+          }
         }
         return false
       }
@@ -94,7 +131,7 @@ export const useAuthStore = defineStore('auth', {
         }
         setApiAuthTokenProvider(() => this.token)
       } catch (err) {
-        this.lastError = err instanceof Error ? err.message : String(err)
+        this.lastError = getLoginErrorMessage(err)
         logAppEvent('error', 'auth', `${system} login failed`, err)
         throw err
       } finally {

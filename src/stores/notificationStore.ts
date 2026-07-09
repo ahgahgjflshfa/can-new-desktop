@@ -6,6 +6,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { isTauriRuntime } from '@/tauri/window'
 import { logAppEvent } from '@/services/appLogger'
+import { useSystemStore } from '@/stores/systemStore'
 import type { CanTask } from '@/types/can'
 
 const NOTIFICATION_STORAGE_KEY = 'tauri-app:notifications'
@@ -98,6 +99,12 @@ function isMainWindowActive(): boolean {
 
   const hasFocus = typeof document.hasFocus === 'function' ? document.hasFocus() : true
   return document.visibilityState === 'visible' && hasFocus
+}
+
+function isNotificationForCurrentView(notification: EmergencyNotification | NotificationState): boolean {
+  const systemStore = useSystemStore()
+  const notificationSystem = getNotificationSystem(notification)
+  return systemStore.currentView === notificationSystem
 }
 
 function hasLmaAuthToken(): boolean {
@@ -417,7 +424,7 @@ export const useNotificationStore = defineStore('notifications', {
         return
       }
 
-      if (isMainWindowActive()) {
+      if (isMainWindowActive() && isNotificationForCurrentView(target)) {
         await this.hidePopup()
         this.showInAppReminder(candidates.length)
         this.currentNotification = target
@@ -486,7 +493,7 @@ export const useNotificationStore = defineStore('notifications', {
     setupWindowFocusListener() {
       if (_windowFocusHandler) return
       _windowFocusHandler = () => {
-        if (this.currentNotification) {
+        if (this.currentNotification && isNotificationForCurrentView(this.currentNotification)) {
           this.hidePopup()
         }
       }
@@ -650,7 +657,7 @@ export const useNotificationStore = defineStore('notifications', {
 
       if (!isTauriRuntime()) return
 
-      if (isMainWindowActive()) {
+      if (isMainWindowActive() && isNotificationForCurrentView(notification)) {
         this.isPopupVisible = false
         return
       }

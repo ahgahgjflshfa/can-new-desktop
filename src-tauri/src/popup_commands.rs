@@ -109,11 +109,6 @@ pub async fn hide_alert_popup(app: tauri::AppHandle) -> Result<(), String> {
             );
             e.to_string()
         })?;
-    } else {
-        runtime_log::warn(
-            LOG_SOURCE,
-            "hide_alert_popup called but popup window does not exist",
-        );
     }
     Ok(())
 }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { emit, listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import { logAppEvent } from '@/services/appLogger'
 import type { NotificationPriority } from '@/types/notification'
@@ -116,14 +116,20 @@ const formattedTime = computed(() => {
   return date.toLocaleString()
 })
 
+const notificationSystem = computed<'lma' | 'can'>(() =>
+  currentNotification.value?.metadata?.system === 'can' ? 'can' : 'lma'
+)
+
 async function openMainWindow() {
-  logAppEvent('info', 'popup', 'requested opening main window from popup')
+  const targetSystem = notificationSystem.value
+  logAppEvent('info', 'popup', 'requested opening main window from popup', { targetSystem })
   try {
     await invoke('hide_alert_popup')
   } catch (err) {
     logAppEvent('warn', 'popup', 'failed to hide popup before opening main window', err)
   }
   await invoke('show_emergency_window')
+  await emit('open-notification-system', { system: targetSystem })
 }
 
 onMounted(async () => {

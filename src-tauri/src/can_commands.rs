@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::can_api_client::{CanApiEnvelope, build_can_api_client, build_can_api_url};
+use crate::can_api_client::{build_can_api_client, build_can_api_url, CanApiEnvelope};
 use crate::runtime_log;
 
 const LOG_SOURCE: &str = "can";
@@ -20,7 +20,7 @@ struct CanLoginApiData {
 }
 
 fn parse_jwt_sub(token: &str) -> Option<String> {
-    use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
     let parts: Vec<&str> = token.split('.').collect();
     if parts.len() < 2 {
         return None;
@@ -333,9 +333,14 @@ pub async fn can_complete_task(
                 )
                 .as_str(),
             );
-            return Err(format!("Complete CAN task failed with status {}", status_code));
+            return Err(format!(
+                "Complete CAN task failed with status {}",
+                status_code
+            ));
         }
-    } else if let Ok(envelope) = serde_json::from_str::<CanApiEnvelope<serde_json::Value>>(&body_text) {
+    } else if let Ok(envelope) =
+        serde_json::from_str::<CanApiEnvelope<serde_json::Value>>(&body_text)
+    {
         let message = envelope
             .message
             .unwrap_or_else(|| format!("Complete CAN task failed with status {}", status_code));

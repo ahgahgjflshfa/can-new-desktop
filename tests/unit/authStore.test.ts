@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useAuthStore } from '@/stores/authStore'
+import { useSystemStore } from '@/stores/systemStore'
 import type { AuthUser } from '@/types/auth'
 
 const loginWithPasswordMock = vi.fn()
@@ -71,15 +72,81 @@ describe('authStore', () => {
     expect(localStorage.setItem).toHaveBeenCalled()
   })
 
-  test('login exposes service error message', async () => {
+  test('reports lma authenticated immediately after login', async () => {
+    loginWithPasswordMock.mockResolvedValue({ token: 'abc', user: mockUser('Alice') })
+    const store = useAuthStore()
+    const systemStore = useSystemStore()
+
+    expect(store.isSystemAuthenticated('lma')).toBe(false)
+    expect(systemStore.isLmaAuthenticated).toBe(false)
+
+    await store.login('lma', 'alice', 'secret')
+
+    expect(store.isSystemAuthenticated('lma')).toBe(true)
+    expect(systemStore.isLmaAuthenticated).toBe(true)
+  })
+
+  test('reports lma unauthenticated immediately after logout', async () => {
+    logoutWithTokenMock.mockResolvedValue(undefined)
+    const store = useAuthStore()
+    const systemStore = useSystemStore()
+
+    store.token = 'will-clear'
+    store.user = mockUser('Bob')
+
+    expect(store.isSystemAuthenticated('lma')).toBe(true)
+    expect(systemStore.isLmaAuthenticated).toBe(true)
+
+    await store.logout()
+
+    expect(store.isSystemAuthenticated('lma')).toBe(false)
+    expect(systemStore.isLmaAuthenticated).toBe(false)
+  })
+
+  test('keeps lma authenticated indicator true after switching to can when lma auth is persisted', async () => {
+    loginWithPasswordMock.mockResolvedValue({ token: 'abc', user: mockUser('Alice') })
+    const store = useAuthStore()
+    const systemStore = useSystemStore()
+
+    await store.login('lma', 'alice', 'secret')
+    systemStore.switchView('can')
+
+    expect(store.currentSystem).toBe('can')
+    expect(store.isSystemAuthenticated('lma')).toBe(true)
+    expect(systemStore.isLmaAuthenticated).toBe(true)
+  })
+
+  test('validates legacy lma auth storage before reporting authenticated', () => {
+    const store = useAuthStore()
+
+    localStorage.setItem('tauri-app:auth', 'not-json')
+    store.switchSystem('can')
+
+    expect(store.isSystemAuthenticated('lma')).toBe(false)
+
+    localStorage.setItem('tauri-app:auth', JSON.stringify({ token: 'legacy-token', user: mockUser() }))
+
+    expect(store.isSystemAuthenticated('lma')).toBe(true)
+  })
+
+  test('login shows a localized message for invalid credentials', async () => {
     loginWithPasswordMock.mockRejectedValue(new Error('Invalid credentials'))
     const store = useAuthStore()
 
     await expect(store.login('lma', 'bad', 'bad')).rejects.toThrow('Invalid credentials')
 
-    expect(store.lastError).toBe('Invalid credentials')
+    expect(store.lastError).toBe('帳號或密碼錯誤，請重新輸入。')
     expect(store.isSubmitting).toBe(false)
     expect(store.isAuthenticated).toBe(false)
+  })
+
+  test('login keeps backend Chinese error messages', async () => {
+    loginWithPasswordMock.mockRejectedValue(new Error('帳號已停用，請聯絡管理員。'))
+    const store = useAuthStore()
+
+    await expect(store.login('lma', 'disabled', 'secret')).rejects.toThrow('帳號已停用')
+
+    expect(store.lastError).toBe('帳號已停用，請聯絡管理員。')
   })
 
   test('logout clears session and calls API with current token', async () => {

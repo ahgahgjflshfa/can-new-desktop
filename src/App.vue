@@ -9,12 +9,18 @@ import { useStore } from '@/store'
 import { useSystemStore } from '@/stores/systemStore'
 import { useAuthStore } from '@/stores/authStore'
 import { useNotificationStore } from '@/stores/notificationStore'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
 const store = useStore()
 const systemStore = useSystemStore()
 const authStore = useAuthStore()
 const notificationStore = useNotificationStore()
 const hasInitializedNotifications = ref(false)
+let unlistenOpenNotificationSystem: UnlistenFn | null = null
+
+interface OpenNotificationSystemPayload {
+  system?: 'lma' | 'can'
+}
 
 async function syncNotificationRuntimeByAuth() {
   if (authStore.isSystemAuthenticated('lma')) {
@@ -39,6 +45,19 @@ onMounted(() => {
   store.initApp()
   authStore.init()
   void syncNotificationRuntimeByAuth()
+  void listen<OpenNotificationSystemPayload>('open-notification-system', event => {
+    const targetSystem = event.payload.system
+    if (targetSystem === 'lma' || targetSystem === 'can') {
+      systemStore.switchView(targetSystem)
+    }
+  }).then(unlisten => {
+    unlistenOpenNotificationSystem = unlisten
+  })
+})
+
+onUnmounted(() => {
+  unlistenOpenNotificationSystem?.()
+  unlistenOpenNotificationSystem = null
 })
 
 watch(
