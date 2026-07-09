@@ -84,25 +84,6 @@ async function handleComplete(serialNumber: number, resolutionType: number) {
   }
 }
 
-async function handleMarkIncomplete(serialNumber: number) {
-  if (!authStore.token || isActionPending.value) return
-  isActionPending.value = true
-  actionError.value = null
-  try {
-    await completeCanTask(authStore.token, serialNumber, false)
-    const task = tasks.value.find(t => t.serialNumber === serialNumber)
-    if (task) {
-      task.isDone = false
-      task.resolutionType = 0
-    }
-  } catch (err) {
-    actionError.value = err instanceof Error ? err.message : String(err)
-    logAppEvent('error', 'can-task-view', 'failed to mark incomplete', err)
-  } finally {
-    isActionPending.value = false
-  }
-}
-
 function formatDate(dateString: string): string {
   const date = new Date(dateString)
   const now = new Date()
@@ -290,16 +271,6 @@ watch(() => notificationStore.canPollingIntervalMs, () => {
                   </button>
                 </div>
 
-                <div v-else class="mt-3 flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    class="rounded-full bg-[var(--app-muted)] px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-60"
-                    :disabled="isActionPending"
-                    @click="handleMarkIncomplete(task.serialNumber)"
-                  >
-                    標記未完成
-                  </button>
-                </div>
               </div>
             </div>
           </div>
