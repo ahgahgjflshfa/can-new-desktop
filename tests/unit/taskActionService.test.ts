@@ -1,20 +1,14 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { invoke } from '@tauri-apps/api/core'
-import { getApiAuthToken } from '@/services/apiClient'
 import { completeTask, replyTask } from '@/services/taskActionService'
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
 }))
 
-vi.mock('@/services/apiClient', () => ({
-  getApiAuthToken: vi.fn(),
-}))
-
 describe('taskActionService', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.mocked(getApiAuthToken).mockReturnValue(null)
     vi.mocked(invoke).mockResolvedValue('replied')
 
     const storage: Record<string, string> = {}
@@ -34,10 +28,8 @@ describe('taskActionService', () => {
     })
   })
 
-  test('replyTask uses the lma auth token from storage in popup context', async () => {
-    localStorage.setItem('tauri-app:auth:lma', JSON.stringify({ token: 'lma-token' }))
-
-    await replyTask(42)
+  test('replyTask uses its explicit lma token in popup context', async () => {
+    await replyTask('lma-token', 42)
 
     expect(invoke).toHaveBeenCalledWith('reply_task', {
       token: 'lma-token',
@@ -45,14 +37,11 @@ describe('taskActionService', () => {
     })
   })
 
-  test('completeTask prefers the active api token over persisted storage', async () => {
-    vi.mocked(getApiAuthToken).mockReturnValue('active-token')
-    localStorage.setItem('tauri-app:auth:lma', JSON.stringify({ token: 'lma-token' }))
-
-    await completeTask(42, 'normal')
+  test('completeTask uses its explicit lma token', async () => {
+    await completeTask('lma-token', 42, 'normal')
 
     expect(invoke).toHaveBeenCalledWith('complete_task', {
-      token: 'active-token',
+      token: 'lma-token',
       taskId: 42,
       result: 'normal',
     })

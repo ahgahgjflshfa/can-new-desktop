@@ -84,7 +84,8 @@ function getLevelColor(level: AppLogLevel): string {
   return 'var(--app-success)'
 }
 
-const tokenPreview = computed(() => (authStore.token ? `${authStore.token.slice(0, 20)}...` : '—'))
+const systemSession = computed(() => authStore.getSystemSession(props.system))
+const tokenPreview = computed(() => (systemSession.value?.token ? `${systemSession.value.token.slice(0, 20)}...` : '—'))
 
 function isLmaUser(user: AuthUser | CanAuthUser | null): user is AuthUser {
   return Boolean(user && 'stationId' in user)
@@ -95,7 +96,7 @@ function isCanUser(user: AuthUser | CanAuthUser | null): user is CanAuthUser {
 }
 
 const accountRows = computed(() => {
-  const user = authStore.user
+  const user = systemSession.value?.user ?? null
   if (props.system === 'lma' && isLmaUser(user)) {
     return [
       { label: '名稱', value: user.name },
@@ -117,8 +118,8 @@ const accountRows = computed(() => {
 
 const debugInfo = computed(() => ({
   system: systemName.value,
-  authenticated: authStore.isAuthenticated,
-  user: authStore.user,
+  authenticated: authStore.isSystemAuthenticated(props.system),
+  user: systemSession.value?.user ?? null,
   tokenPreview: tokenPreview.value,
   polling: {
     enabled: pollingEnabled.value,
@@ -148,8 +149,7 @@ async function handleLogout() {
   if (isLoggingOut.value) return
   isLoggingOut.value = true
   try {
-    authStore.switchSystem(props.system)
-    await authStore.logout()
+    await authStore.logout(props.system)
   } finally {
     isLoggingOut.value = false
   }

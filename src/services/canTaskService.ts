@@ -4,12 +4,20 @@ import type { CanTask } from '@/types/can'
 
 const LOG_SOURCE = 'can-task-service'
 
+function requireCanToken(token: string): string {
+  if (!token) {
+    logAppEvent('error', LOG_SOURCE, 'CAN task action requested without CAN auth token')
+    throw new Error('缺少 Q 潔淨立馬清登入驗證資訊，請重新登入')
+  }
+  return token
+}
+
 export async function fetchCanTasks(token: string, stationCode: string): Promise<CanTask[]> {
   logAppEvent('info', LOG_SOURCE, 'Fetching CAN tasks', { stationCode })
 
   try {
     const tasks = await invoke<CanTask[]>('can_fetch_tasks', {
-      token,
+      token: requireCanToken(token),
       stationCode,
     })
 
@@ -39,7 +47,7 @@ export async function completeCanTask(
 
   try {
     await invoke('can_complete_task', {
-      token,
+      token: requireCanToken(token),
       serialNumber,
       isDone,
       resolutionType: resolutionType ?? null,

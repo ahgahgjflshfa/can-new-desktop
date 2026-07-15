@@ -50,8 +50,8 @@ interface CanStoredAuthState {
 
 export const useAuthStore = defineStore('auth', {
   state: () => ({
-    token: null as string | null,
-    user: null as AuthUser | CanAuthUser | null,
+    lmaSession: null as LmaStoredAuthState | null,
+    canSession: null as CanStoredAuthState | null,
     currentSystem: 'lma' as SystemType,
     isHydrated: false,
     isSubmitting: false,
@@ -59,37 +59,17 @@ export const useAuthStore = defineStore('auth', {
   }),
 
   getters: {
-    isAuthenticated: state => Boolean(state.token),
-    displayName: state => state.user?.name ?? '',
+    token: state => (state.currentSystem === 'lma' ? state.lmaSession : state.canSession)?.token ?? null,
+    user: state => (state.currentSystem === 'lma' ? state.lmaSession : state.canSession)?.user ?? null,
+    isAuthenticated: state => Boolean((state.currentSystem === 'lma' ? state.lmaSession : state.canSession)?.token),
+    displayName: state => (state.currentSystem === 'lma' ? state.lmaSession : state.canSession)?.user.name ?? '',
+    getSystemSession: state => (system: SystemType) => {
+      const session = system === 'lma' ? state.lmaSession : state.canSession
+      return session
+    },
     isSystemAuthenticated: state => (system: SystemType) => {
-      if (system === state.currentSystem) {
-        return Boolean(state.token)
-      }
-
-      if (typeof localStorage === 'undefined') return false
-      const key = system === 'lma' ? LMA_AUTH_STORAGE_KEY : CAN_AUTH_STORAGE_KEY
-      const raw = localStorage.getItem(key)
-      if (!raw) {
-        // backward compatibility: check old key for lma
-        if (system === 'lma') {
-          const oldRaw = localStorage.getItem(AUTH_STORAGE_KEY)
-          if (oldRaw) {
-            try {
-              const parsed = JSON.parse(oldRaw)
-              return typeof parsed?.token === 'string' && parsed.token.length > 0
-            } catch {
-              return false
-            }
-          }
-        }
-        return false
-      }
-      try {
-        const parsed = JSON.parse(raw)
-        return typeof parsed?.token === 'string' && parsed.token.length > 0
-      } catch {
-        return false
-      }
+      const session = system === 'lma' ? state.lmaSession : state.canSession
+      return Boolean(session?.token)
     },
   },
 
@@ -108,10 +88,10 @@ export const useAuthStore = defineStore('auth', {
       try {
         if (system === 'lma') {
           const result = await loginWithPassword(account, password)
-          this.token = result.token
-          this.user = result.user
+          this.lmaSession = { token: result.token, user: result.user }
           this.currentSystem = 'lma'
-          this.persistToStorage('lma')
+          this.selectSystem('lma')
+          this.persistSession('lma')
           logAppEvent('info', 'auth', 'lma login succeeded', {
             account,
             stationId: result.user.stationId,
@@ -119,10 +99,10 @@ export const useAuthStore = defineStore('auth', {
           })
         } else {
           const result = await canLoginWithPassword(account, password)
-          this.token = result.token
-          this.user = result.user
+          this.canSession = { token: result.token, user: result.user }
           this.currentSystem = 'can'
-          this.persistToStorage('can')
+          this.selectSystem('can')
+          this.persistSession('can')
           logAppEvent('info', 'auth', 'can login succeeded', {
             account,
             station: result.user.station,
@@ -139,14 +119,15 @@ export const useAuthStore = defineStore('auth', {
       }
     },
 
-    async logout() {
-      const currentSystem = this.currentSystem
-      const currentToken = this.token
-      this.clearSession()
+    async logout(system?: SystemType) {
+      const targetSystem = system ?? this.currentSystem
+      const session = this.getSystemSession(targetSystem)
+      const currentToken = session?.token ?? null
+      this.clearSession(targetSystem)
 
       if (!currentToken) return
 
-      if (currentSystem === 'lma') {
+      if (targetSystem === 'lma') {
         try {
           await logoutWithToken(currentToken)
         } catch (err) {
@@ -156,18 +137,15 @@ export const useAuthStore = defineStore('auth', {
       }
       // CAN logout is handled locally (no backend logout endpoint)
 
-      logAppEvent('info', 'auth', `${currentSystem} logout completed`)
+      logAppEvent('info', 'auth', `${targetSystem} logout completed`)
     },
 
     switchSystem(system: SystemType) {
       if (this.currentSystem === system) return
 
-      this.persistToStorage(this.currentSystem)
       this.currentSystem = system
-      this.token = null
-      this.user = null
+      this.selectSystem(system)
       this.lastError = null
-      this.loadSystemFromStorage(system)
       setApiAuthTokenProvider(() => this.token)
 
       logAppEvent('info', 'auth', `switched to ${system}`, {
@@ -175,11 +153,13 @@ export const useAuthStore = defineStore('auth', {
       })
     },
 
-    clearSession() {
-      this.token = null
-      this.user = null
+    clearSession(system?: SystemType) {
+      const targetSystem = system ?? this.currentSystem
+      if (targetSystem === 'lma') this.lmaSession = null
+      else this.canSession = null
+      this.clearStorage(targetSystem)
+      if (targetSystem === this.currentSystem) this.selectSystem(targetSystem)
       this.lastError = null
-      this.clearStorage(this.currentSystem)
     },
 
     loadFromStorage() {
@@ -200,7 +180,9 @@ export const useAuthStore = defineStore('auth', {
         }
       }
 
-      this.loadSystemFromStorage(this.currentSystem)
+      this.loadSystemFromStorage('lma')
+      this.loadSystemFromStorage('can')
+      this.selectSystem(this.currentSystem)
     },
 
     loadSystemFromStorage(system: SystemType) {
@@ -223,14 +205,19 @@ export const useAuthStore = defineStore('auth', {
 
       const record = parsed as Record<string, unknown>
       if (typeof record.token === 'string' && record.token.length > 0 && record.user) {
-        this.token = record.token
-        this.user = record.user as AuthUser | CanAuthUser
+        if (system === 'lma') this.lmaSession = { token: record.token, user: record.user as AuthUser }
+        else this.canSession = { token: record.token, user: record.user as CanAuthUser }
       }
     },
 
-    persistToStorage(system: SystemType) {
+    selectSystem(system: SystemType) {
+      // Compatibility getters derive the active token/user from currentSystem.
+    },
+
+    persistSession(system: SystemType) {
       if (typeof localStorage === 'undefined') return
-      if (!this.token || !this.user) {
+      const session = this.getSystemSession(system)
+      if (!session?.token || !session.user) {
         this.clearStorage(system)
         return
       }
@@ -241,14 +228,18 @@ export const useAuthStore = defineStore('auth', {
         localStorage.setItem(
           key,
           JSON.stringify({
-            token: this.token,
-            user: this.user,
+            token: session.token,
+            user: session.user,
           })
         )
       } catch (err) {
         logAppEvent('warn', 'auth', `failed to persist ${system} auth state`, err)
         console.warn(`failed to persist ${system} auth state`, err)
       }
+    },
+
+    persistToStorage(system: SystemType) {
+      this.persistSession(system)
     },
 
     clearStorage(system: SystemType) {

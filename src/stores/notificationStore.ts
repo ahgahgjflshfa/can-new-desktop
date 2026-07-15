@@ -8,6 +8,9 @@ import { isTauriRuntime } from '@/tauri/window'
 import { logAppEvent } from '@/services/appLogger'
 import { useSystemStore } from '@/stores/systemStore'
 import type { CanTask } from '@/types/can'
+import { useAuthStore } from '@/stores/authStore'
+import { completeCanTask } from '@/services/canTaskService'
+import { getCanNotificationController, getLmaNotificationController, isLmaNotificationRuntimeManaged, reconcileCanNotificationRuntime, reconcileLmaNotificationRuntime, triggerCanNotificationRuntime } from '@/services/lmaNotificationRuntime'
 
 const NOTIFICATION_STORAGE_KEY = 'tauri-app:notifications'
 const SETTINGS_STORAGE_KEY = 'tauri-app:notification-settings'
@@ -86,6 +89,16 @@ let _popupClosedEventUnlisten: UnlistenFn | null = null
 let _windowFocusHandler: (() => void) | null = null
 let _windowBlurHandler: (() => void) | null = null
 let inAppReminderTimeoutId: ReturnType<typeof setTimeout> | null = null
+let popupNativeOperation: Promise<void> = Promise.resolve()
+let reminderCyclePromise: Promise<void> | null = null
+let reminderCycleDirty = false
+
+function serializePopupOperation(operation: () => Promise<void>): Promise<void> {
+  if (!getLmaNotificationController()) return operation()
+  const next = popupNativeOperation.catch(() => undefined).then(operation)
+  popupNativeOperation = next
+  return next
+}
 
 function clearInAppReminderTimeout(): void {
   if (inAppReminderTimeoutId !== null) {
@@ -190,6 +203,7 @@ export const useNotificationStore = defineStore('notifications', {
     notifications: [] as NotificationState[],
     currentNotification: null as NotificationState | null,
     isPolling: false,
+    lmaRuntimeActive: true,
     lastError: null as string | null,
     pollingEnabled: true,
     pollingIntervalMs: DEFAULT_POLLING_INTERVAL,
@@ -197,6 +211,10 @@ export const useNotificationStore = defineStore('notifications', {
     canPollingIntervalMs: DEFAULT_POLLING_INTERVAL,
     isCanPolling: false,
     canPollingLastError: null as string | null,
+    canRuntimeActive: false,
+    canRequestInFlight: false,
+    canHasSnapshot: false,
+    canTasksSnapshot: [] as CanTask[],
     pollingStats: {
       lastPollTime: null as Date | null,
       nextPollTime: null as Date | null,
@@ -224,7 +242,8 @@ export const useNotificationStore = defineStore('notifications', {
 
     notificationCount: state => state.notifications.length,
 
-    unreadCount: state => state.notifications.filter(n => n.status !== 'dismissed').length,
+    unreadCount: state => state.notifications.filter(n => n.status !== 'dismissed' &&
+      ((n.metadata?.system === 'can' && state.canRuntimeActive) || (n.metadata?.system !== 'can' && state.lmaRuntimeActive))).length,
 
     alertsToday: state => {
       const todayStart = new Date()
@@ -259,7 +278,8 @@ export const useNotificationStore = defineStore('notifications', {
     },
 
     pendingAlertCount: state => {
-      return state.notifications.filter(n => n.priority === 'pending' && n.status !== 'dismissed').length
+      return state.notifications.filter(n => n.priority === 'pending' && n.status !== 'dismissed' &&
+        ((state.lmaRuntimeActive && n.metadata?.system !== 'can') || (state.canRuntimeActive && n.metadata?.system === 'can'))).length
     },
 
     pollingIntervalSeconds: state => {
@@ -269,6 +289,7 @@ export const useNotificationStore = defineStore('notifications', {
     canPollingIntervalSeconds: state => {
       return state.canPollingIntervalMs / 1000
     },
+    canActiveTasks: state => state.canTasksSnapshot.filter(task => !task.isDone),
   },
 
   actions: {
@@ -395,27 +416,30 @@ export const useNotificationStore = defineStore('notifications', {
         return current
       }
 
-      return unresolved[0] ?? null
+      return unresolved[unresolved.length - 1] ?? null
     },
 
     getReminderCandidates() {
       const pending = this.notifications.filter(
-        notification => notification.status !== 'dismissed' && notification.priority === 'pending'
+        notification => notification.status !== 'dismissed' && notification.priority === 'pending' &&
+          ((this.lmaRuntimeActive && getNotificationSystem(notification) === 'lma') || (this.canRuntimeActive && getNotificationSystem(notification) === 'can'))
       )
       if (pending.length > 0) {
         return pending
       }
 
       return this.notifications.filter(
-        notification => notification.status !== 'dismissed' && this.isRepliedEscalated(notification)
+        notification => notification.status !== 'dismissed' && this.isRepliedEscalated(notification) &&
+          ((this.lmaRuntimeActive && getNotificationSystem(notification) === 'lma') || (this.canRuntimeActive && getNotificationSystem(notification) === 'can'))
       )
     },
 
     getNextPendingNotification() {
-      return this.notifications.find(notification => notification.status === 'pending') ?? null
+      return this.notifications.find(notification => notification.status === 'pending' &&
+        ((this.lmaRuntimeActive && getNotificationSystem(notification) === 'lma') || (this.canRuntimeActive && getNotificationSystem(notification) === 'can'))) ?? null
     },
 
-    async runReminderCycle() {
+    async runReminderCycleNow() {
       const candidates = this.getReminderCandidates()
       const target = this.getReminderTarget(candidates)
       if (!target) {
@@ -425,9 +449,10 @@ export const useNotificationStore = defineStore('notifications', {
       }
 
       if (isMainWindowActive() && isNotificationForCurrentView(target)) {
+        target.status = 'shown'
+        this.currentNotification = target
         await this.hidePopup()
         this.showInAppReminder(candidates.length)
-        this.currentNotification = target
         logAppEvent('info', 'notifications', 'showing in-app reminder instead of popup', {
           count: candidates.length,
           notificationId: target.id,
@@ -440,6 +465,23 @@ export const useNotificationStore = defineStore('notifications', {
         await this.showNotification(target.id)
       }
     },
+
+    async runReminderCycle() {
+      if (!isLmaNotificationRuntimeManaged()) return this.runReminderCycleNow()
+      reminderCycleDirty = true
+      if (reminderCyclePromise) return reminderCyclePromise
+
+      reminderCyclePromise = (async () => {
+        do {
+          reminderCycleDirty = false
+          await this.runReminderCycleNow()
+        } while (reminderCycleDirty)
+      })().finally(() => {
+        reminderCyclePromise = null
+      })
+      return reminderCyclePromise
+    },
+
 
     async setupDismissListener() {
       if (!isTauriRuntime()) return
@@ -494,7 +536,7 @@ export const useNotificationStore = defineStore('notifications', {
       if (_windowFocusHandler) return
       _windowFocusHandler = () => {
         if (this.currentNotification && isNotificationForCurrentView(this.currentNotification)) {
-          this.hidePopup()
+          void this.runReminderCycle()
         }
       }
       _windowBlurHandler = () => {
@@ -509,8 +551,32 @@ export const useNotificationStore = defineStore('notifications', {
       window.addEventListener('blur', _windowBlurHandler)
     },
 
+    handleDismissEvent(payload: DismissPayload) {
+      if (payload.dismissAll) {
+        this.dismissAllNotificationsInternal()
+      } else if (payload.notificationId) {
+        this.dismissNotificationById(payload.notificationId)
+      }
+    },
+
+    handlePopupClosedEvent(notificationId: string | null) {
+      if (notificationId) {
+        const notification = this.notifications.find(n => n.id === notificationId)
+        if (notification && notification.status !== 'dismissed') {
+          notification.status = 'pending'
+          notification.dismissedAt = undefined
+        }
+        if (this.currentNotification?.id === notificationId) this.currentNotification = null
+      }
+      this.isPopupVisible = false
+      void this.runReminderCycle()
+    },
+
     teardown() {
       this.stopPolling()
+      popupNativeOperation = Promise.resolve()
+      reminderCyclePromise = null
+      reminderCycleDirty = false
       clearInAppReminderTimeout()
       if (_dismissEventUnlisten) {
         _dismissEventUnlisten()
@@ -531,6 +597,10 @@ export const useNotificationStore = defineStore('notifications', {
     },
 
     startPolling() {
+      if (getLmaNotificationController() || isLmaNotificationRuntimeManaged()) {
+        reconcileLmaNotificationRuntime()
+        return
+      }
       if (!hasLmaAuthToken()) {
         this.isPolling = false
         this.lastError = null
@@ -569,6 +639,11 @@ export const useNotificationStore = defineStore('notifications', {
     },
 
     stopPolling() {
+      if (getLmaNotificationController() || isLmaNotificationRuntimeManaged()) {
+        reconcileLmaNotificationRuntime()
+        void this.runReminderCycle()
+        return
+      }
       const poller = getNotificationPoller()
       poller.stop()
       this.isPolling = false
@@ -583,6 +658,11 @@ export const useNotificationStore = defineStore('notifications', {
     },
 
     async manualRefresh() {
+      const controller = getLmaNotificationController()
+      if (controller || isLmaNotificationRuntimeManaged()) {
+        if (controller) await controller.trigger()
+        return
+      }
       if (!this.isPolling) {
         logAppEvent('warn', 'notifications', 'manual refresh skipped because polling is not active')
         return
@@ -618,9 +698,6 @@ export const useNotificationStore = defineStore('notifications', {
         }
         this.notifications.unshift(notificationState)
 
-        if (!this.currentNotification) {
-          this.showNotification(notificationState.id)
-        }
       }
 
       this.reconcileMissingRemoteTasks(normalizedNotifications, system)
@@ -643,9 +720,61 @@ export const useNotificationStore = defineStore('notifications', {
       this.handleNewNotifications(unresolvedTasks.map(convertCanTaskToNotification), 'can')
     },
 
+    setCanSnapshot(tasks: CanTask[]) {
+      this.canTasksSnapshot = tasks.map(task => ({ ...task }))
+      this.canHasSnapshot = true
+      this.canPollingLastError = null
+      this.handleCanTasks(this.canTasksSnapshot)
+    },
+
+    async refreshCanTasks() {
+      await triggerCanNotificationRuntime()
+    },
+
+    clearCanSnapshot() {
+      this.canTasksSnapshot = []
+      this.canHasSnapshot = false
+      for (const notification of this.notifications) {
+        if (getNotificationSystem(notification) === 'can' && this.isTaskUnresolved(notification)) {
+          this.resolveNotificationFromPolling(notification.id)
+        }
+      }
+      if (this.currentNotification && getNotificationSystem(this.currentNotification) === 'can') {
+        this.currentNotification = null
+      }
+      void this.runReminderCycle()
+    },
+
+    async completeCanTask(serialNumber: number, resolutionType: number) {
+      const authStore = useAuthStore()
+      const token = authStore.getSystemSession('can')?.token
+      const station = authStore.getSystemSession('can')?.user
+      const stationCode = station && 'station' in station ? station.station : null
+      if (!token || !stationCode) throw new Error('缺少 Q 潔淨立馬清登入驗證資訊，請重新登入')
+      const controller = getCanNotificationController()
+      const generation = controller?.getGeneration()
+      await completeCanTask(token, serialNumber, true, resolutionType)
+      const currentSession = authStore.getSystemSession('can')
+      const currentUser = currentSession?.user
+      const currentStation = currentUser && 'station' in currentUser ? currentUser.station : null
+      if (currentSession?.token !== token || currentStation !== stationCode ||
+        (controller && controller.getGeneration() !== generation)) return
+      const task = this.canTasksSnapshot.find(item => item.serialNumber === serialNumber)
+      if (task) {
+        task.isDone = true
+        task.resolutionType = resolutionType
+      }
+      this.handleCanTasks(this.canTasksSnapshot)
+      this.resolveNotificationFromPolling(getCanNotificationId(serialNumber), 'completed')
+      controller?.invalidate()
+      await triggerCanNotificationRuntime()
+    },
+
     async showNotification(notificationId: string) {
       const notification = this.notifications.find(n => n.id === notificationId)
       if (!notification) return
+      if ((getNotificationSystem(notification) === 'lma' && !this.lmaRuntimeActive) ||
+        (getNotificationSystem(notification) === 'can' && !this.canRuntimeActive)) return
 
       if (this.currentNotification?.id === notificationId && notification.status === 'shown' && this.isPopupVisible) {
         return
@@ -667,7 +796,7 @@ export const useNotificationStore = defineStore('notifications', {
           notificationId: notification.id,
           priority: notification.priority,
         })
-        await invoke('show_alert_popup', {
+        await serializePopupOperation(() => invoke('show_alert_popup', {
           notification: {
             id: notification.id,
             title: notification.title,
@@ -678,7 +807,7 @@ export const useNotificationStore = defineStore('notifications', {
             unreadCount: this.unreadCount,
             metadata: notification.metadata,
           },
-        })
+        }))
       } catch (err) {
         notification.status = 'pending'
         if (this.currentNotification?.id === notification.id) {
@@ -738,7 +867,9 @@ export const useNotificationStore = defineStore('notifications', {
       this.taskActionError = null
 
       try {
-        const status = await replyTask(taskId)
+        const token = useAuthStore().getSystemSession('lma')?.token
+        if (!token) throw new Error('缺少立碼幫幫忙登入驗證資訊，請重新登入')
+        const status = await replyTask(token, taskId)
         if (status === 'replied' || status === 'completed' || status === 'ignored' || status === 'pending') {
           this.setTaskStatus(notificationId, status)
         } else {
@@ -765,7 +896,9 @@ export const useNotificationStore = defineStore('notifications', {
       this.taskActionError = null
 
       try {
-        await completeTask(taskId, result)
+        const token = useAuthStore().getSystemSession('lma')?.token
+        if (!token) throw new Error('缺少立碼幫幫忙登入驗證資訊，請重新登入')
+        await completeTask(token, taskId, result)
         this.setTaskStatus(notificationId, 'completed')
         this.dismissNotificationById(notificationId)
         logAppEvent('info', 'notifications', 'task completion succeeded', { notificationId, result })
@@ -797,16 +930,13 @@ export const useNotificationStore = defineStore('notifications', {
 
       if (this.currentNotification?.id === notificationId) {
         this.currentNotification = null
-
-        const nextPending = this.getNextPendingNotification()
-        if (nextPending) {
-          this.showNotification(nextPending.id)
-        } else {
-          this.hidePopup()
-        }
       }
 
       this.saveToStorage()
+      void this.runReminderCycle().catch(err => {
+        logAppEvent('warn', 'notifications', 'reminder cycle after dismissal failed', err)
+        console.warn('Reminder cycle after dismissal failed:', err)
+      })
     },
 
     async dismissCurrentNotification() {
@@ -824,7 +954,7 @@ export const useNotificationStore = defineStore('notifications', {
       }
       this.currentNotification = null
       this.hideInAppReminder()
-      this.hidePopup()
+      void this.runReminderCycle()
       this.saveToStorage()
     },
 
@@ -836,7 +966,7 @@ export const useNotificationStore = defineStore('notifications', {
       this.isPopupVisible = false
       if (isTauriRuntime()) {
         try {
-          await invoke('hide_alert_popup')
+          await serializePopupOperation(() => invoke('hide_alert_popup'))
         } catch (err) {
           logAppEvent('warn', 'notifications', 'failed to hide alert popup', err)
           console.warn('Failed to hide alert popup:', err)
@@ -881,6 +1011,7 @@ export const useNotificationStore = defineStore('notifications', {
         this.stopPolling()
       }
       this.saveSettings()
+      reconcileLmaNotificationRuntime()
       logAppEvent('info', 'notifications', 'updated polling enabled setting', { enabled })
     },
 
@@ -888,8 +1019,12 @@ export const useNotificationStore = defineStore('notifications', {
       const clampedSeconds = clampPollingIntervalSeconds(seconds)
       this.pollingIntervalMs = clampedSeconds * 1000
 
-      const poller = getNotificationPoller()
-      poller.updateConfig({ intervalMs: this.pollingIntervalMs })
+      reconcileLmaNotificationRuntime()
+
+      if (!isLmaNotificationRuntimeManaged()) {
+        const poller = getNotificationPoller()
+        poller.updateConfig({ intervalMs: this.pollingIntervalMs })
+      }
 
       this.saveSettings()
       logAppEvent('info', 'notifications', 'updated polling interval', { seconds: clampedSeconds })
@@ -897,6 +1032,8 @@ export const useNotificationStore = defineStore('notifications', {
 
     setCanPollingEnabled(enabled: boolean) {
       this.canPollingEnabled = enabled
+      reconcileCanNotificationRuntime()
+      if (!enabled) void this.runReminderCycle()
       this.saveSettings()
       logAppEvent('info', 'notifications', 'updated CAN polling enabled setting', { enabled })
     },
@@ -904,6 +1041,7 @@ export const useNotificationStore = defineStore('notifications', {
     setCanPollingInterval(seconds: number) {
       const clampedSeconds = clampPollingIntervalSeconds(seconds)
       this.canPollingIntervalMs = clampedSeconds * 1000
+      reconcileCanNotificationRuntime()
       this.saveSettings()
       logAppEvent('info', 'notifications', 'updated CAN polling interval', { seconds: clampedSeconds })
     },
@@ -915,8 +1053,31 @@ export const useNotificationStore = defineStore('notifications', {
       }
     },
 
+    setCanRuntimeState(active: boolean) {
+      this.canRuntimeActive = active
+      this.isCanPolling = active
+      if (!active) void this.runReminderCycle()
+    },
+
+    setCanRequestState(inFlight: boolean) {
+      this.canRequestInFlight = inFlight
+    },
+
     setCanPollingError(error: string | null) {
       this.canPollingLastError = error
+    },
+
+    setLmaRuntimeState(active: boolean) {
+      this.lmaRuntimeActive = active
+      this.isPolling = active
+      if (!active) this.lastError = null
+      void this.runReminderCycle()
+    },
+
+    setPollingError(error: string | null) {
+      this.lastError = error
+      this.pollingStats.lastError = error
+      this.pollingStats.isConnected = error === null
     },
 
     loadFromStorage() {

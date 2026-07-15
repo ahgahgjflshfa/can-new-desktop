@@ -4,7 +4,10 @@ import { invoke } from '@tauri-apps/api/core'
 import { isTauriRuntime } from '@/tauri/window'
 import { useNotificationStore } from '@/stores/notificationStore'
 import { useSystemStore } from '@/stores/systemStore'
+import { useAuthStore } from '@/stores/authStore'
 import { completeTask, replyTask } from '@/services/taskActionService'
+import { completeCanTask, fetchCanTasks } from '@/services/canTaskService'
+import { getCanNotificationController, initializeNotificationRuntime, teardownNotificationRuntime } from '@/services/lmaNotificationRuntime'
 import type { CanTask } from '@/types/can'
 import type { EmergencyNotification } from '@/types/notification'
 
@@ -51,9 +54,19 @@ vi.mock('@/services/taskActionService', () => ({
   completeTask: vi.fn(),
 }))
 
+vi.mock('@/services/canTaskService', () => ({
+  fetchCanTasks: vi.fn(),
+  completeCanTask: vi.fn(),
+}))
+
 describe('notificationStore', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    teardownNotificationRuntime()
+    const testStore = useNotificationStore()
+    testStore.notifications = []
+    testStore.canRuntimeActive = true
+    testStore.canTasksSnapshot = []
     vi.clearAllMocks()
     vi.mocked(isTauriRuntime).mockReturnValue(false)
     Object.defineProperty(document, 'visibilityState', {
@@ -80,7 +93,13 @@ describe('notificationStore', () => {
   })
 
   afterEach(() => {
-    useNotificationStore().teardown()
+    const store = useNotificationStore()
+    store.teardown()
+    store.notifications = []
+    store.currentNotification = null
+    store.canTasksSnapshot = []
+    store.canHasSnapshot = false
+    teardownNotificationRuntime()
   })
 
   function createMockNotification(overrides: Partial<EmergencyNotification> = {}): EmergencyNotification {
@@ -137,6 +156,156 @@ describe('notificationStore', () => {
   })
 
   describe('handleNewNotifications', () => {
+    test('real CAN completion fences deferred poll and performs one authoritative refresh', async () => {
+      const store = useNotificationStore()
+      const authStore = useAuthStore()
+      authStore.canSession = { token: 'can-token', user: { name: 'CAN', station: 'C1', topic: 'cleaning' } }
+      store.canPollingEnabled = true
+      store.canPollingIntervalMs = 60_000
+      const task = {
+        serialNumber: 701,
+        station: 'C1',
+        trashBin: 'bin',
+        isDone: false,
+        cleanAt: null,
+        informTime: 1,
+        resolutionType: 0,
+        visitorID: null,
+        isDisable: false,
+        createdAt: '2026-01-01',
+        updatedAt: '2026-01-01',
+      } as CanTask
+      let resolveOld!: (tasks: CanTask[]) => void
+      vi.mocked(fetchCanTasks).mockReturnValueOnce(new Promise(resolve => { resolveOld = resolve }))
+        .mockResolvedValueOnce([])
+      vi.mocked(completeCanTask).mockResolvedValue(undefined)
+      const runtimeAuthStore = { getSystemSession: (system: 'lma' | 'can') => system === 'can' ? authStore.canSession : null }
+      await initializeNotificationRuntime({ notificationStore: store, authStore: runtimeAuthStore, onOpenSystem: vi.fn() })
+      const controller = getCanNotificationController()
+      expect(controller).not.toBeNull()
+      await vi.waitFor(() => expect(fetchCanTasks).toHaveBeenCalledTimes(1))
+
+      store.setCanSnapshot([task])
+      await store.completeCanTask(701, 1)
+      expect(completeCanTask).toHaveBeenCalledWith('can-token', 701, true, 1)
+      expect(fetchCanTasks).toHaveBeenCalledTimes(1)
+      resolveOld([task])
+      await vi.waitFor(() => expect(fetchCanTasks).toHaveBeenCalledTimes(2))
+      await Promise.resolve()
+
+      expect(store.canTasksSnapshot).toEqual([])
+      expect(store.notifications.find(notification => notification.id === 'can:701')?.status).toBe('dismissed')
+      expect(store.currentNotification?.id).not.toBe('can:701')
+      expect(fetchCanTasks).toHaveBeenCalledTimes(2)
+    })
+
+    test('tracks authoritative CAN snapshot/error state and filters inactive CAN unread count', () => {
+      const store = useNotificationStore()
+      const canTask = {
+        serialNumber: 700,
+        station: 'C1',
+        trashBin: 'bin',
+        isDone: false,
+        cleanAt: null,
+        informTime: 1,
+        resolutionType: 0,
+        visitorID: null,
+        isDisable: false,
+        createdAt: '2026-01-01',
+        updatedAt: '2026-01-01',
+      } as CanTask
+      store.setCanRuntimeState(true)
+      store.setCanSnapshot([canTask])
+      expect(store.canHasSnapshot).toBe(true)
+      expect(store.canTasksSnapshot).toHaveLength(1)
+      expect(store.unreadCount).toBe(1)
+      store.setCanPollingError('offline')
+      expect(store.canTasksSnapshot).toHaveLength(1)
+      store.setCanSnapshot([])
+      expect(store.canPollingLastError).toBeNull()
+      store.setCanRuntimeState(false)
+      expect(store.unreadCount).toBe(0)
+    })
+
+    test('managed popup reconciliation serializes deferred operations and hands off after LMA disable', async () => {
+      const store = useNotificationStore()
+      const authStore = useAuthStore()
+      authStore.lmaSession = { token: 'lma-token', user: { name: 'LMA', stationId: 'A1', sectionId: null, role: 'staff' } }
+      const getSession = vi.fn<() => { token: string } | null>(() => ({ token: 'lma-token' }))
+      const runtimeAuthStore = { getSystemSession: getSession }
+      vi.mocked(isTauriRuntime).mockReturnValue(true)
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' })
+
+      let resolveFirst!: () => void
+      let inFlight = 0
+      let maxInFlight = 0
+      const firstOperation = new Promise<void>(resolve => { resolveFirst = resolve })
+      vi.mocked(invoke).mockImplementation(async (command: string) => {
+        if (command !== 'show_alert_popup') return undefined
+        inFlight++
+        maxInFlight = Math.max(maxInFlight, inFlight)
+        if (inFlight === 1) await firstOperation
+        inFlight--
+        return undefined
+      })
+
+      await initializeNotificationRuntime({ notificationStore: store, authStore: runtimeAuthStore, onOpenSystem: vi.fn() })
+      store.setLmaRuntimeState(true)
+      store.setCanRuntimeState(true)
+      const first = createMockNotification({ id: 'managed-first' })
+      const second = createMockNotification({ id: 'managed-second' })
+      store.handleNewNotifications([first])
+      await vi.waitFor(() => {
+        expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === 'show_alert_popup')).toHaveLength(1)
+      })
+      store.handleNewNotifications([second])
+      store.dismissNotificationById(first.id)
+      await Promise.resolve()
+      await Promise.resolve()
+
+      expect(maxInFlight).toBe(1)
+      resolveFirst()
+      await vi.waitFor(() => {
+        expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === 'show_alert_popup')).toHaveLength(2)
+      })
+      expect(maxInFlight).toBe(1)
+
+      const getShowIds = () => vi.mocked(invoke).mock.calls
+        .filter(([command]) => command === 'show_alert_popup')
+        .map(([, payload]) => (payload as { notification?: { id?: string } }).notification?.id)
+
+      authStore.lmaSession = null
+      runtimeAuthStore.getSystemSession.mockReturnValue(null)
+      store.setPollingEnabled(false)
+      store.dismissNotificationById(second.id)
+      store.handleNewNotifications([createMockNotification({ id: 'inactive-lma' })])
+      store.handleCanTasks([{
+        serialNumber: 9001,
+        station: 'A1',
+        trashBin: '1F',
+        isDone: false,
+        cleanAt: null,
+        informTime: 0,
+        resolutionType: 0,
+        visitorID: null,
+        isDisable: false,
+        createdAt: '2026-06-12T05:00:00.000Z',
+        updatedAt: '2026-06-12T05:00:00.000Z',
+      }])
+      await store.runReminderCycle()
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(store.currentNotification?.id).toBe('can:9001')
+      const showIds = getShowIds()
+      const invokeCountAfterReconciliation = vi.mocked(invoke).mock.calls.length
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(vi.mocked(invoke).mock.calls.length).toBe(invokeCountAfterReconciliation)
+      expect(showIds).not.toContain('inactive-lma')
+      expect(showIds[showIds.length - 1]).toBe('can:9001')
+      teardownNotificationRuntime()
+    })
+
     test('adds new notifications to the list', () => {
       const store = useNotificationStore()
       const notification = createMockNotification()
@@ -380,6 +549,53 @@ describe('notificationStore', () => {
       expect(replyTask).not.toHaveBeenCalled()
       expect(completeTask).not.toHaveBeenCalled()
       expect(store.taskActionError).toBe('任務編號無效')
+    })
+
+    test('routes LMA notification actions to LMA token while CAN is active', async () => {
+      const authStore = useAuthStore()
+      authStore.lmaSession = { token: 'lma-token', user: { name: 'LMA', stationId: 'A1', sectionId: null, role: 'staff' } }
+      authStore.canSession = { token: 'can-token', user: { name: 'CAN', station: 'C1', topic: 'general' } }
+      authStore.switchSystem('can')
+      vi.mocked(replyTask).mockResolvedValue('replied')
+      vi.mocked(completeTask).mockResolvedValue('completed')
+      const store = useNotificationStore()
+      store.handleNewNotifications([createMockNotification({ id: '42', metadata: { system: 'lma', taskId: 42 } })])
+
+      await store.replyTaskById('42')
+      await store.completeTaskById('42', 'normal')
+
+      expect(replyTask).toHaveBeenCalledWith('lma-token', 42)
+      expect(completeTask).toHaveBeenCalledWith('lma-token', 42, 'normal')
+    })
+
+    test('blocks LMA notification actions before IPC when the LMA session is missing', async () => {
+      const authStore = useAuthStore()
+      authStore.canSession = { token: 'can-token', user: { name: 'CAN', station: 'C1', topic: 'general' } }
+      authStore.switchSystem('can')
+      const store = useNotificationStore()
+      store.handleNewNotifications([createMockNotification({ id: '42', metadata: { system: 'lma', taskId: 42 } })])
+
+      await store.replyTaskById('42')
+      await store.completeTaskById('42', 'normal')
+
+      expect(replyTask).not.toHaveBeenCalled()
+      expect(completeTask).not.toHaveBeenCalled()
+      expect(store.taskActionError).toContain('立碼幫幫忙')
+    })
+
+    test('dismissal does not revive inactive LMA and hands off to CAN', async () => {
+      const store = useNotificationStore()
+      store.handleNewNotifications([
+        createMockNotification({ id: 'lma-inactive', metadata: { system: 'lma' } }),
+      ])
+      store.lmaRuntimeActive = false
+      store.handleCanTasks([createCanTask({ serialNumber: 456 })])
+
+      store.dismissNotificationById('lma-inactive')
+      await Promise.resolve()
+
+      expect(store.currentNotification?.id).toBe('can:456')
+      expect(store.currentNotification?.metadata?.system).toBe('can')
     })
   })
 

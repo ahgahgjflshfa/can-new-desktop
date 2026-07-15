@@ -1,81 +1,31 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { useAuthStore } from '@/stores/authStore'
+import { computed, ref } from 'vue'
 import { useNotificationStore } from '@/stores/notificationStore'
-import { fetchCanTasks, completeCanTask } from '@/services/canTaskService'
 import { logAppEvent } from '@/services/appLogger'
 import SystemSettingsPanel from '@/components/SystemSettingsPanel.vue'
-import type { CanTask } from '@/types/can'
 
-const authStore = useAuthStore()
 const notificationStore = useNotificationStore()
-const tasks = ref<CanTask[]>([])
 const activeTab = ref<'active' | 'completed' | 'settings'>('active')
-const isLoading = ref(false)
-const error = ref<string | null>(null)
 const isActionPending = ref(false)
 const actionError = ref<string | null>(null)
-let pollInterval: ReturnType<typeof setInterval> | null = null
+const tasks = computed(() => notificationStore.canTasksSnapshot ?? [])
+const isLoading = computed(() => notificationStore.canRequestInFlight)
+const error = computed(() => notificationStore.canPollingLastError)
 
 const activeTasks = computed(() => tasks.value.filter(t => !t.isDone))
 const completedTasks = computed(() => tasks.value.filter(t => t.isDone))
 const visibleTasks = computed(() => activeTab.value === 'active' ? activeTasks.value : completedTasks.value)
 
-const userStation = computed(() => {
-  if (authStore.user && 'station' in authStore.user) {
-    return authStore.user.station
-  }
-  return ''
-})
-
 async function loadTasks() {
-  if (!authStore.token || !userStation.value) return
-  isLoading.value = true
-  error.value = null
-  try {
-    const result = await fetchCanTasks(authStore.token, userStation.value)
-    tasks.value = result
-    notificationStore.handleCanTasks(result)
-    notificationStore.setCanPollingError(null)
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err)
-    notificationStore.setCanPollingError(error.value)
-    logAppEvent('error', 'can-task-view', 'failed to load tasks', err)
-  } finally {
-    isLoading.value = false
-  }
-}
-
-function startPolling() {
-  if (pollInterval) return
-  if (!notificationStore.canPollingEnabled) return
-  notificationStore.setCanPollingRuntimeState(true)
-  void loadTasks()
-  pollInterval = setInterval(() => {
-    void loadTasks()
-  }, notificationStore.canPollingIntervalMs)
-}
-
-function stopPolling() {
-  if (pollInterval) {
-    clearInterval(pollInterval)
-    pollInterval = null
-  }
-  notificationStore.setCanPollingRuntimeState(false)
+  await notificationStore.refreshCanTasks()
 }
 
 async function handleComplete(serialNumber: number, resolutionType: number) {
-  if (!authStore.token || isActionPending.value) return
+  if (isActionPending.value) return
   isActionPending.value = true
   actionError.value = null
   try {
-    await completeCanTask(authStore.token, serialNumber, true, resolutionType)
-    const task = tasks.value.find(t => t.serialNumber === serialNumber)
-    if (task) {
-      task.isDone = true
-      task.resolutionType = resolutionType
-    }
-    notificationStore.resolveNotificationFromPolling(`can:${serialNumber}`, 'completed')
+    await notificationStore.completeCanTask(serialNumber, resolutionType)
   } catch (err) {
     actionError.value = err instanceof Error ? err.message : String(err)
     logAppEvent('error', 'can-task-view', 'failed to complete task', err)
@@ -99,39 +49,6 @@ function formatDate(dateString: string): string {
   return date.toLocaleDateString()
 }
 
-onMounted(() => {
-  if (authStore.isAuthenticated && userStation.value) {
-    startPolling()
-  }
-})
-
-onUnmounted(() => {
-  stopPolling()
-})
-
-watch(() => authStore.isAuthenticated, (isAuth) => {
-  if (isAuth && userStation.value) {
-    startPolling()
-  } else {
-    stopPolling()
-    tasks.value = []
-  }
-})
-
-watch(() => notificationStore.canPollingEnabled, (enabled) => {
-  if (enabled && authStore.isAuthenticated && userStation.value) {
-    startPolling()
-  } else {
-    stopPolling()
-  }
-})
-
-watch(() => notificationStore.canPollingIntervalMs, () => {
-  if (authStore.isAuthenticated && userStation.value && notificationStore.canPollingEnabled) {
-    stopPolling()
-    startPolling()
-  }
-})
 </script>
 
 <template>

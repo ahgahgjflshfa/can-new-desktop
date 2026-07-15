@@ -10,7 +10,7 @@ const MISSING_TIMESTAMP_ISO = new Date(0).toISOString()
 type NotificationSourceMode = 'server' | 'mock'
 
 interface NotificationDataSource {
-  fetchNotifications: (serverUrl?: string, lastSyncTime?: string) => Promise<NotificationApiResponse>
+  fetchNotifications: (serverUrl?: string, lastSyncTime?: string, token?: string) => Promise<NotificationApiResponse>
 }
 
 interface TaskItem {
@@ -69,8 +69,8 @@ function getLmaAuthToken(): string | null {
 
 function createServerNotificationDataSource(): NotificationDataSource {
   return {
-    async fetchNotifications(serverUrl?: string, lastSyncTime?: string) {
-      const token = getLmaAuthToken()
+    async fetchNotifications(serverUrl?: string, lastSyncTime?: string, explicitToken?: string) {
+      const token = explicitToken ?? getLmaAuthToken()
       if (!token) {
         logAppEvent('error', LOG_SOURCE, 'Cannot fetch notifications because LMA auth token is missing')
         throw new Error('Missing authentication token')
@@ -130,6 +130,6 @@ function createNotificationDataSource(mode: NotificationSourceMode): Notificatio
 
 const dataSource = createNotificationDataSource(getSourceMode())
 
-export async function fetchNotifications(serverUrl?: string, lastSyncTime?: string): Promise<NotificationApiResponse> {
-  return dataSource.fetchNotifications(serverUrl, lastSyncTime)
+export async function fetchNotifications(serverUrl?: string, lastSyncTime?: string, token?: string): Promise<NotificationApiResponse> {
+  return dataSource.fetchNotifications(serverUrl, lastSyncTime, token)
 }

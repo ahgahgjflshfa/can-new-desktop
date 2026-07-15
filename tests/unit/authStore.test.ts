@@ -3,10 +3,12 @@ import { createPinia, setActivePinia } from 'pinia'
 import { useAuthStore } from '@/stores/authStore'
 import { useSystemStore } from '@/stores/systemStore'
 import type { AuthUser } from '@/types/auth'
+import type { CanAuthUser } from '@/types/can'
 
 const loginWithPasswordMock = vi.fn()
 const logoutWithTokenMock = vi.fn()
 const setApiAuthTokenProviderMock = vi.fn()
+const canLoginWithPasswordMock = vi.fn()
 
 vi.mock('@/services/authService', () => ({
   loginWithPassword: (...args: unknown[]) => loginWithPasswordMock(...args),
@@ -15,6 +17,10 @@ vi.mock('@/services/authService', () => ({
 
 vi.mock('@/services/apiClient', () => ({
   setApiAuthTokenProvider: (...args: unknown[]) => setApiAuthTokenProviderMock(...args),
+}))
+
+vi.mock('@/services/canAuthService', () => ({
+  canLoginWithPassword: (...args: unknown[]) => canLoginWithPasswordMock(...args),
 }))
 
 describe('authStore', () => {
@@ -41,6 +47,10 @@ describe('authStore', () => {
       sectionId: null,
       role: 'staff',
     }
+  }
+
+  function mockCanUser(name = 'CAN User'): CanAuthUser {
+    return { name, station: 'C1', topic: 'general' }
   }
 
   test('hydrates from storage during init', () => {
@@ -91,8 +101,7 @@ describe('authStore', () => {
     const store = useAuthStore()
     const systemStore = useSystemStore()
 
-    store.token = 'will-clear'
-    store.user = mockUser('Bob')
+    store.lmaSession = { token: 'will-clear', user: mockUser('Bob') }
 
     expect(store.isSystemAuthenticated('lma')).toBe(true)
     expect(systemStore.isLmaAuthenticated).toBe(true)
@@ -101,6 +110,33 @@ describe('authStore', () => {
 
     expect(store.isSystemAuthenticated('lma')).toBe(false)
     expect(systemStore.isLmaAuthenticated).toBe(false)
+  })
+
+  test('hydrates both independent sessions and switching does not mutate either', () => {
+    localStorage.setItem('tauri-app:auth:lma', JSON.stringify({ token: 'lma-token', user: mockUser('LMA') }))
+    localStorage.setItem('tauri-app:auth:can', JSON.stringify({ token: 'can-token', user: mockCanUser() }))
+    const store = useAuthStore()
+
+    store.init()
+    store.switchSystem('can')
+    store.switchSystem('lma')
+
+    expect(store.getSystemSession('lma')?.token).toBe('lma-token')
+    expect(store.getSystemSession('can')?.token).toBe('can-token')
+    expect(store.token).toBe('lma-token')
+  })
+
+  test('targeted logout clears only the requested system', async () => {
+    localStorage.setItem('tauri-app:auth:lma', JSON.stringify({ token: 'lma-token', user: mockUser() }))
+    localStorage.setItem('tauri-app:auth:can', JSON.stringify({ token: 'can-token', user: mockCanUser() }))
+    const store = useAuthStore()
+    store.init()
+
+    await store.logout('can')
+
+    expect(store.isSystemAuthenticated('lma')).toBe(true)
+    expect(store.isSystemAuthenticated('can')).toBe(false)
+    expect(store.currentSystem).toBe('lma')
   })
 
   test('keeps lma authenticated indicator true after switching to can when lma auth is persisted', async () => {
@@ -125,6 +161,7 @@ describe('authStore', () => {
     expect(store.isSystemAuthenticated('lma')).toBe(false)
 
     localStorage.setItem('tauri-app:auth', JSON.stringify({ token: 'legacy-token', user: mockUser() }))
+    store.init()
 
     expect(store.isSystemAuthenticated('lma')).toBe(true)
   })
@@ -153,8 +190,7 @@ describe('authStore', () => {
     logoutWithTokenMock.mockResolvedValue(undefined)
     const store = useAuthStore()
 
-    store.token = 'will-clear'
-    store.user = mockUser('Bob')
+    store.lmaSession = { token: 'will-clear', user: mockUser('Bob') }
 
     await store.logout()
 
