@@ -8,9 +8,13 @@ import { isTauriRuntime } from '@/tauri/window'
 import { logAppEvent } from '@/services/appLogger'
 import { useSystemStore } from '@/stores/systemStore'
 import type { CanTask } from '@/types/can'
+import type { ChargeTask } from '@/types/charge'
+import type { ChargeRuntimeContext } from '@/services/chargeNotificationRuntime'
 import { useAuthStore } from '@/stores/authStore'
 import { completeCanTask } from '@/services/canTaskService'
-import { getCanNotificationController, getLmaNotificationController, isLmaNotificationRuntimeManaged, reconcileCanNotificationRuntime, reconcileLmaNotificationRuntime, triggerCanNotificationRuntime } from '@/services/lmaNotificationRuntime'
+import { completeChargeTask, isChargeForbidden } from '@/services/chargeTaskService'
+import { getCanNotificationController, getChargeNotificationController, getLmaNotificationController, isLmaNotificationRuntimeManaged, reconcileCanNotificationRuntime, reconcileLmaNotificationRuntime, triggerCanNotificationRuntime, triggerChargeNotificationRuntime } from '@/services/lmaNotificationRuntime'
+import type { SystemType } from '@/types/system'
 
 const NOTIFICATION_STORAGE_KEY = 'tauri-app:notifications'
 const SETTINGS_STORAGE_KEY = 'tauri-app:notification-settings'
@@ -23,10 +27,27 @@ const MAX_POLLING_INTERVAL_SECONDS = 300
 const IN_APP_REMINDER_MS = 4000
 const REPLIED_ESCALATION_MS = 15 * 60 * 1000
 const CAN_NOTIFICATION_CATEGORY = 'Q 潔淨立馬清'
-type NotificationSystem = 'lma' | 'can'
+type NotificationSystem = SystemType
 
 function getCanNotificationId(serialNumber: number | string): string {
   return `can:${serialNumber}`
+}
+
+function getChargeNotificationId(serialNumber: number | string): string { return `charge:${serialNumber}` }
+
+function convertChargeTaskToNotification(task: ChargeTask): EmergencyNotification | null {
+  const status = task.status.trim().toLowerCase()
+  if (status !== 'pending' && status !== 'processing') return null
+  return {
+    id: getChargeNotificationId(task.serialNumber),
+    title: '無線充故障任務',
+    body: `${task.deviceCode} ${task.faultDescription}`,
+    priority: status === 'processing' ? 'replied' : 'pending',
+    category: '無線充故障',
+    createdAt: task.createdAt,
+    receivedAt: new Date().toISOString(),
+    metadata: { system: 'charge', serialNumber: task.serialNumber, station: task.station, deviceCode: task.deviceCode },
+  }
 }
 
 function convertCanTaskToNotification(task: CanTask): EmergencyNotification {
@@ -50,20 +71,25 @@ function convertCanTaskToNotification(task: CanTask): EmergencyNotification {
 
 function notificationBelongsToSystem(notification: EmergencyNotification | NotificationState, system: NotificationSystem): boolean {
   const notificationSystem = notification.metadata?.system
-  if (system === 'can') {
-    return notificationSystem === 'can'
-  }
-  return notificationSystem !== 'can'
+  if (system === 'lma') return notificationSystem === undefined || notificationSystem === 'lma'
+  return notificationSystem === system
 }
 
-function getNotificationSystem(notification: EmergencyNotification | NotificationState): NotificationSystem {
-  return notification.metadata?.system === 'can' ? 'can' : 'lma'
+function getNotificationSystem(notification: EmergencyNotification | NotificationState): NotificationSystem | null {
+  const system = notification.metadata?.system
+  if (system === undefined || system === 'lma') return 'lma'
+  if (system === 'can' || system === 'charge') return system
+  return null
 }
 
 function getStoredNotificationId(notification: EmergencyNotification, system: NotificationSystem): string {
   if (system === 'can') {
     const serialNumber = notification.metadata?.serialNumber
     return getCanNotificationId(typeof serialNumber === 'number' || typeof serialNumber === 'string' ? serialNumber : notification.id)
+  }
+  if (system === 'charge') {
+    const serialNumber = notification.metadata?.serialNumber
+    return getChargeNotificationId(typeof serialNumber === 'number' || typeof serialNumber === 'string' ? serialNumber : notification.id)
   }
   return notification.id
 }
@@ -173,8 +199,13 @@ function normalizeStoredNotification(input: unknown): NotificationState | null {
   if (typeof record.createdAt !== 'string') return null
   if (typeof record.receivedAt !== 'string') return null
 
+  const metadata = record.metadata && typeof record.metadata === 'object' ? (record.metadata as Record<string, unknown>) : undefined
+  const source = metadata?.system
+  if (source !== undefined && source !== 'lma' && source !== 'can' && source !== 'charge') return null
+  const normalizedId = source === 'charge' && (typeof metadata?.serialNumber === 'number' || typeof metadata?.serialNumber === 'string')
+    ? getChargeNotificationId(metadata.serialNumber) : record.id
   return {
-    id: record.id,
+    id: normalizedId,
     title: record.title,
     body: record.body,
     priority: normalizePriority(record.priority),
@@ -185,8 +216,7 @@ function normalizeStoredNotification(input: unknown): NotificationState | null {
     repliedAt: typeof record.repliedAt === 'string' ? record.repliedAt : undefined,
     category: typeof record.category === 'string' ? record.category : undefined,
     actionUrl: typeof record.actionUrl === 'string' ? record.actionUrl : undefined,
-    metadata:
-      record.metadata && typeof record.metadata === 'object' ? (record.metadata as Record<string, unknown>) : undefined,
+    metadata,
   }
 }
 
@@ -215,6 +245,14 @@ export const useNotificationStore = defineStore('notifications', {
     canRequestInFlight: false,
     canHasSnapshot: false,
     canTasksSnapshot: [] as CanTask[],
+    chargePollingEnabled: true,
+    chargePollingIntervalMs: DEFAULT_POLLING_INTERVAL,
+    isChargePolling: false,
+    chargePollingLastError: null as string | null,
+    chargeRuntimeActive: false,
+    chargeRequestInFlight: false,
+    chargeCompletionInFlight: false,
+    chargeTasksSnapshot: [] as ChargeTask[],
     pollingStats: {
       lastPollTime: null as Date | null,
       nextPollTime: null as Date | null,
@@ -243,7 +281,9 @@ export const useNotificationStore = defineStore('notifications', {
     notificationCount: state => state.notifications.length,
 
     unreadCount: state => state.notifications.filter(n => n.status !== 'dismissed' &&
-      ((n.metadata?.system === 'can' && state.canRuntimeActive) || (n.metadata?.system !== 'can' && state.lmaRuntimeActive))).length,
+      ((n.metadata?.system === 'can' && state.canRuntimeActive) ||
+        (n.metadata?.system === 'charge' && state.chargeRuntimeActive) ||
+        ((n.metadata?.system === undefined || n.metadata?.system === 'lma') && state.lmaRuntimeActive))).length,
 
     alertsToday: state => {
       const todayStart = new Date()
@@ -279,7 +319,9 @@ export const useNotificationStore = defineStore('notifications', {
 
     pendingAlertCount: state => {
       return state.notifications.filter(n => n.priority === 'pending' && n.status !== 'dismissed' &&
-        ((state.lmaRuntimeActive && n.metadata?.system !== 'can') || (state.canRuntimeActive && n.metadata?.system === 'can'))).length
+        ((state.lmaRuntimeActive && (n.metadata?.system === undefined || n.metadata?.system === 'lma')) ||
+          (state.canRuntimeActive && n.metadata?.system === 'can') ||
+          (state.chargeRuntimeActive && n.metadata?.system === 'charge'))).length
     },
 
     pollingIntervalSeconds: state => {
@@ -290,6 +332,8 @@ export const useNotificationStore = defineStore('notifications', {
       return state.canPollingIntervalMs / 1000
     },
     canActiveTasks: state => state.canTasksSnapshot.filter(task => !task.isDone),
+    chargePollingIntervalSeconds: state => state.chargePollingIntervalMs / 1000,
+    chargeActiveTasks: state => state.chargeTasksSnapshot.filter(task => ['pending', 'processing'].includes(task.status.trim().toLowerCase())),
   },
 
   actions: {
@@ -422,7 +466,7 @@ export const useNotificationStore = defineStore('notifications', {
     getReminderCandidates() {
       const pending = this.notifications.filter(
         notification => notification.status !== 'dismissed' && notification.priority === 'pending' &&
-          ((this.lmaRuntimeActive && getNotificationSystem(notification) === 'lma') || (this.canRuntimeActive && getNotificationSystem(notification) === 'can'))
+          ((this.lmaRuntimeActive && getNotificationSystem(notification) === 'lma') || (this.canRuntimeActive && getNotificationSystem(notification) === 'can') || (this.chargeRuntimeActive && getNotificationSystem(notification) === 'charge'))
       )
       if (pending.length > 0) {
         return pending
@@ -430,13 +474,13 @@ export const useNotificationStore = defineStore('notifications', {
 
       return this.notifications.filter(
         notification => notification.status !== 'dismissed' && this.isRepliedEscalated(notification) &&
-          ((this.lmaRuntimeActive && getNotificationSystem(notification) === 'lma') || (this.canRuntimeActive && getNotificationSystem(notification) === 'can'))
+          ((this.lmaRuntimeActive && getNotificationSystem(notification) === 'lma') || (this.canRuntimeActive && getNotificationSystem(notification) === 'can') || (this.chargeRuntimeActive && getNotificationSystem(notification) === 'charge'))
       )
     },
 
     getNextPendingNotification() {
       return this.notifications.find(notification => notification.status === 'pending' &&
-        ((this.lmaRuntimeActive && getNotificationSystem(notification) === 'lma') || (this.canRuntimeActive && getNotificationSystem(notification) === 'can'))) ?? null
+        ((this.lmaRuntimeActive && getNotificationSystem(notification) === 'lma') || (this.canRuntimeActive && getNotificationSystem(notification) === 'can') || (this.chargeRuntimeActive && getNotificationSystem(notification) === 'charge'))) ?? null
     },
 
     async runReminderCycleNow() {
@@ -731,6 +775,105 @@ export const useNotificationStore = defineStore('notifications', {
       await triggerCanNotificationRuntime()
     },
 
+    handleChargeTasks(tasks: ChargeTask[]) {
+      this.chargeTasksSnapshot = tasks.map(task => ({ ...task }))
+      this.setChargeSnapshot(this.chargeTasksSnapshot)
+    },
+
+    setChargeSnapshot(tasks: ChargeTask[], _context?: ChargeRuntimeContext) {
+      const station = this.chargeStation()
+      const sanitized = tasks.filter(task => {
+        const status = task.status.trim().toLowerCase()
+        if (status === 'done' || status === 'cancelled') return false
+        if (status !== 'pending' && status !== 'processing') {
+          console.warn('Ignoring unknown charge task status:', task.status)
+          return false
+        }
+        return Boolean(station) && task.station.trim() === station
+      }).map(task => ({ ...task, station: task.station.trim(), status: task.status.trim().toLowerCase() }))
+      this.chargeTasksSnapshot = sanitized
+      this.chargeRequestInFlight = false
+      this.chargePollingLastError = null
+      const incoming = sanitized.map(convertChargeTaskToNotification).filter((item): item is EmergencyNotification => item !== null)
+      this.handleNewNotifications(incoming, 'charge')
+    },
+
+    refreshChargeTasks() { return triggerChargeNotificationRuntime() },
+
+    clearChargeState() {
+      this.chargeTasksSnapshot = []
+      this.chargeRequestInFlight = false
+      this.chargePollingLastError = null
+      this.notifications = this.notifications.filter(notification => getNotificationSystem(notification) !== 'charge')
+      if (this.currentNotification && getNotificationSystem(this.currentNotification) === 'charge') {
+        this.currentNotification = null
+        this.isPopupVisible = false
+      }
+      void this.runReminderCycle()
+      this.saveToStorage()
+    },
+
+    setChargePollingEnabled(enabled: boolean) {
+      this.chargePollingEnabled = enabled
+      const controller = getChargeNotificationController()
+      if (controller) controller.reconcile({ enabled, intervalMs: this.chargePollingIntervalMs, token: useAuthStore().getSystemSession('charge')?.token ?? null, station: this.chargeStation() })
+      this.saveSettings()
+    },
+
+    setChargePollingInterval(seconds: number) {
+      this.chargePollingIntervalMs = clampPollingIntervalSeconds(seconds) * 1000
+      const controller = getChargeNotificationController()
+      if (controller) controller.reconcile({ enabled: this.chargePollingEnabled, intervalMs: this.chargePollingIntervalMs, token: useAuthStore().getSystemSession('charge')?.token ?? null, station: this.chargeStation() })
+      this.saveSettings()
+    },
+
+    setChargeRuntimeState(active: boolean, _context?: ChargeRuntimeContext) {
+      this.chargeRuntimeActive = active; this.isChargePolling = active
+      if (!active) { this.chargeRequestInFlight = false; void this.runReminderCycle() }
+    },
+    setChargeRequestState(inFlight: boolean, _context?: ChargeRuntimeContext) { this.chargeRequestInFlight = inFlight },
+    setChargePollingError(error: string | null, _context?: ChargeRuntimeContext) { this.chargePollingLastError = error; this.chargeRequestInFlight = false },
+    chargeStation(): string | null {
+      const user = useAuthStore().getSystemSession('charge')?.user
+      return user && 'station' in user && typeof user.station === 'string' ? user.station.trim() || null : null
+    },
+
+    async completeChargeTask(serialNumber: number) {
+      if (this.chargeCompletionInFlight) throw new Error('無線充故障任務正在處理中')
+      const task = this.chargeTasksSnapshot.find(item => item.serialNumber === serialNumber && ['pending', 'processing'].includes(item.status.trim().toLowerCase()))
+      const station = this.chargeStation()
+      const token = useAuthStore().getSystemSession('charge')?.token
+      if (!task || !station || !token || task.station.trim() !== station) throw new Error('無效的無線充故障任務')
+      const controller = getChargeNotificationController()
+      if (!controller?.isUsable()) throw new Error('無線充故障輪詢尚未建立')
+      const generation = controller?.getGeneration()
+      this.chargeCompletionInFlight = true
+      try {
+        await completeChargeTask(token, station, serialNumber)
+        const current = useAuthStore().getSystemSession('charge')
+        const currentStation = this.chargeStation()
+        if (current?.token !== token || currentStation !== station || controller !== getChargeNotificationController() || controller?.getGeneration() !== generation) return
+        this.chargeTasksSnapshot = this.chargeTasksSnapshot.filter(item => item.serialNumber !== serialNumber)
+        this.resolveNotificationFromPolling(getChargeNotificationId(serialNumber), 'completed')
+        this.saveToStorage()
+        await this.runReminderCycle()
+        controller?.invalidate()
+        await triggerChargeNotificationRuntime()
+      } catch (error) {
+        const current = useAuthStore().getSystemSession('charge')
+        const currentStation = this.chargeStation()
+        const currentController = getChargeNotificationController()
+        const currentContext = current?.token === token && currentStation === station && currentController === controller && currentController?.getGeneration() === generation
+        if (isChargeForbidden(error) && currentContext) {
+          controller?.invalidate()
+          controller?.reconcile({ enabled: false, intervalMs: this.chargePollingIntervalMs, token: null, station: null })
+          this.clearChargeState()
+          useAuthStore().clearSession('charge')
+        }
+        throw error
+      } finally { this.chargeCompletionInFlight = false }
+    },
+
     clearCanSnapshot() {
       this.canTasksSnapshot = []
       this.canHasSnapshot = false
@@ -773,8 +916,11 @@ export const useNotificationStore = defineStore('notifications', {
     async showNotification(notificationId: string) {
       const notification = this.notifications.find(n => n.id === notificationId)
       if (!notification) return
-      if ((getNotificationSystem(notification) === 'lma' && !this.lmaRuntimeActive) ||
-        (getNotificationSystem(notification) === 'can' && !this.canRuntimeActive)) return
+      const system = getNotificationSystem(notification)
+      if (!system) return
+      if ((system === 'lma' && !this.lmaRuntimeActive) ||
+        (system === 'can' && !this.canRuntimeActive) ||
+        (system === 'charge' && !this.chargeRuntimeActive)) return
 
       if (this.currentNotification?.id === notificationId && notification.status === 'shown' && this.isPopupVisible) {
         return
@@ -845,7 +991,7 @@ export const useNotificationStore = defineStore('notifications', {
 
     getTaskId(notificationId: string): number | null {
       const notification = this.notifications.find(n => n.id === notificationId)
-      if (notification && getNotificationSystem(notification) === 'can') return null
+      if (notification && getNotificationSystem(notification) !== 'lma') return null
 
       const metadataTaskId = notification?.metadata?.taskId
       if (typeof metadataTaskId === 'number' && Number.isFinite(metadataTaskId)) {
@@ -995,6 +1141,7 @@ export const useNotificationStore = defineStore('notifications', {
 
       this.notifications = this.notifications.filter(notification => {
         const system = getNotificationSystem(notification)
+        if (!system) return false
         const kept = keptBySystem.get(system) ?? 0
         if (kept >= MAX_STORED_NOTIFICATIONS) return false
 
@@ -1106,6 +1253,8 @@ export const useNotificationStore = defineStore('notifications', {
             pollingIntervalMs?: number
             canPollingEnabled?: boolean
             canPollingIntervalMs?: number
+            chargePollingEnabled?: boolean
+            chargePollingIntervalMs?: number
           }
           if (typeof settings.pollingEnabled === 'boolean') {
             this.pollingEnabled = settings.pollingEnabled
@@ -1119,6 +1268,8 @@ export const useNotificationStore = defineStore('notifications', {
           if (typeof settings.canPollingIntervalMs === 'number') {
             this.canPollingIntervalMs = clampPollingIntervalSeconds(settings.canPollingIntervalMs / 1000) * 1000
           }
+          if (typeof settings.chargePollingEnabled === 'boolean') this.chargePollingEnabled = settings.chargePollingEnabled
+          if (typeof settings.chargePollingIntervalMs === 'number') this.chargePollingIntervalMs = clampPollingIntervalSeconds(settings.chargePollingIntervalMs / 1000) * 1000
         } catch (err) {
           logAppEvent('warn', 'notifications', 'failed to parse stored settings', err)
           console.warn('Failed to parse stored settings:', err)
@@ -1148,6 +1299,8 @@ export const useNotificationStore = defineStore('notifications', {
             pollingIntervalMs: this.pollingIntervalMs,
             canPollingEnabled: this.canPollingEnabled,
             canPollingIntervalMs: this.canPollingIntervalMs,
+            chargePollingEnabled: this.chargePollingEnabled,
+            chargePollingIntervalMs: this.chargePollingIntervalMs,
           })
         )
       } catch (err) {

@@ -7,7 +7,9 @@ import { useSystemStore } from '@/stores/systemStore'
 import { useAuthStore } from '@/stores/authStore'
 import { completeTask, replyTask } from '@/services/taskActionService'
 import { completeCanTask, fetchCanTasks } from '@/services/canTaskService'
-import { getCanNotificationController, initializeNotificationRuntime, teardownNotificationRuntime } from '@/services/lmaNotificationRuntime'
+import { completeChargeTask, fetchChargeTasks } from '@/services/chargeTaskService'
+import type { ChargeTask } from '@/types/charge'
+import { getCanNotificationController, getChargeNotificationController, initializeNotificationRuntime, teardownNotificationRuntime } from '@/services/lmaNotificationRuntime'
 import type { CanTask } from '@/types/can'
 import type { EmergencyNotification } from '@/types/notification'
 
@@ -59,6 +61,12 @@ vi.mock('@/services/canTaskService', () => ({
   completeCanTask: vi.fn(),
 }))
 
+vi.mock('@/services/chargeTaskService', () => ({
+  completeChargeTask: vi.fn(),
+  fetchChargeTasks: vi.fn(),
+  isChargeForbidden: (error: unknown) => typeof error === 'object' && error !== null && (error as { status?: number }).status === 403,
+}))
+
 describe('notificationStore', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
@@ -68,6 +76,8 @@ describe('notificationStore', () => {
     testStore.canRuntimeActive = true
     testStore.canTasksSnapshot = []
     vi.clearAllMocks()
+    vi.mocked(completeChargeTask).mockReset()
+    vi.mocked(fetchChargeTasks).mockReset()
     vi.mocked(isTauriRuntime).mockReturnValue(false)
     Object.defineProperty(document, 'visibilityState', {
       configurable: true,
@@ -120,6 +130,19 @@ describe('notificationStore', () => {
   }
 
   describe('init', () => {
+    test('hydrates charge settings/notifications, refuses unknown source, and normalizes charge IDs', () => {
+      localStorage.setItem('tauri-app:notification-settings', JSON.stringify({ chargePollingEnabled: false, chargePollingIntervalMs: 20_000 }))
+      localStorage.setItem('tauri-app:notifications', JSON.stringify([
+        { id: '7', title: 'charge', body: 'b', priority: 'pending', status: 'pending', createdAt: '2026-01-01', receivedAt: '2026-01-01', metadata: { system: 'charge', serialNumber: 7 } },
+        { id: 'bad', title: 'bad', body: 'b', priority: 'pending', status: 'pending', createdAt: '2026-01-01', receivedAt: '2026-01-01', metadata: { system: 'other' } },
+      ]))
+      const store = useNotificationStore()
+      store.loadFromStorage()
+      expect(store.chargePollingEnabled).toBe(false)
+      expect(store.chargePollingIntervalMs).toBe(20_000)
+      expect(store.notifications.map(n => n.id)).toEqual(['charge:7'])
+    })
+
     test('starts polling by default when lma is logged in', async () => {
       storeLmaAuthToken()
       const store = useNotificationStore()
@@ -156,6 +179,180 @@ describe('notificationStore', () => {
   })
 
   describe('handleNewNotifications', () => {
+    test('real charge completion fences a deferred poll and performs one authoritative refresh', async () => {
+      const store = useNotificationStore()
+      const authStore = useAuthStore()
+      authStore.chargeSession = { token: 'charge-token', user: { name: 'Charge', account: 'charge', station: ' S1 ', system: 'charge' } }
+      store.chargePollingEnabled = true
+      store.chargePollingIntervalMs = 60_000
+      const task = { serialNumber: 701, deviceCode: 'D1', station: 'S1', status: 'pending', faultDescription: 'fault', faultType: 'x', resolutionType: 0, isDisable: false, createdAt: '2026-01-01', updatedAt: '2026-01-01' } as ChargeTask
+      let resolveOld!: (tasks: ChargeTask[]) => void
+      vi.mocked(fetchChargeTasks).mockReturnValueOnce(new Promise(resolve => { resolveOld = resolve })).mockResolvedValueOnce([])
+      vi.mocked(completeChargeTask).mockResolvedValue(undefined)
+      const runtimeAuthStore = { getSystemSession: ((system: string) => system === 'charge' ? authStore.chargeSession : null) as any, clearSession: vi.fn() }
+      await initializeNotificationRuntime({ notificationStore: store, authStore: runtimeAuthStore, onOpenSystem: vi.fn() })
+      const controller = getChargeNotificationController()
+      expect(controller).not.toBeNull()
+      await vi.waitFor(() => expect(fetchChargeTasks).toHaveBeenCalledTimes(1))
+      store.setChargeSnapshot([task])
+      store.setChargeRuntimeState(true)
+      await store.completeChargeTask(701)
+      expect(fetchChargeTasks).toHaveBeenCalledTimes(1)
+      resolveOld([task])
+      await vi.waitFor(() => expect(fetchChargeTasks).toHaveBeenCalledTimes(2))
+      expect(store.chargeTasksSnapshot).toEqual([])
+      expect(store.notifications.find(n => n.id === 'charge:701')?.status).toBe('dismissed')
+      expect(store.currentNotification?.id).not.toBe('charge:701')
+    })
+
+    test('charge popup counts and cleanup are isolated from LMA/CAN handoff', async () => {
+      const store = useNotificationStore()
+      useAuthStore().chargeSession = { token: 't', user: { name: 'Charge', account: 'c', station: 'S1', system: 'charge' } }
+      store.setChargeRuntimeState(true); store.setCanRuntimeState(true); store.setLmaRuntimeState(true)
+      store.handleNewNotifications([createMockNotification({ id: 'lma-only', metadata: { system: 'lma' } })], 'lma')
+      store.setChargeSnapshot([{ serialNumber: 12, deviceCode: 'D', station: 'S1', status: 'pending', faultDescription: 'f', faultType: 'x', resolutionType: 0, isDisable: false, createdAt: 'now', updatedAt: 'now' } as ChargeTask])
+      expect(store.pendingAlertCount).toBe(2)
+      store.clearChargeState()
+      await Promise.resolve()
+      expect(store.notifications.find(n => n.id === 'lma-only')?.status).not.toBe('dismissed')
+      expect(store.notifications.find(n => n.id === 'charge:12')).toBeUndefined()
+      expect(store.pendingAlertCount).toBe(1)
+    })
+
+    test('charge snapshots enforce station and the five status cases', () => {
+      const store = useNotificationStore()
+      const authStore = useAuthStore()
+      authStore.chargeSession = { token: 't', user: { name: 'Charge', account: 'c', station: ' S1 ', system: 'charge' } }
+      store.setChargeRuntimeState(true)
+      const base = { serialNumber: 1, deviceCode: 'D', station: 'S1', faultDescription: 'f', faultType: 'x', resolutionType: 0, isDisable: false, createdAt: 'now', updatedAt: 'now' }
+      store.setChargeSnapshot([
+        { ...base, serialNumber: 1, status: 'pending' },
+        { ...base, serialNumber: 2, status: ' PROCESSING ' },
+        { ...base, serialNumber: 3, status: 'done' },
+        { ...base, serialNumber: 4, status: 'cancelled' },
+        { ...base, serialNumber: 5, status: 'unknown' },
+        { ...base, serialNumber: 6, station: 'S2', status: 'pending' },
+      ] as ChargeTask[])
+      expect(store.chargeTasksSnapshot.map(t => t.serialNumber)).toEqual([1, 2])
+      expect(store.chargeTasksSnapshot[1]?.status).toBe('processing')
+      expect(store.notifications.map(n => n.id)).toEqual(expect.arrayContaining(['charge:1', 'charge:2']))
+      expect(store.notifications.map(n => n.id)).not.toEqual(expect.arrayContaining(['charge:3', 'charge:4', 'charge:5', 'charge:6']))
+    })
+
+    test('charge completion 403 clears current credentials but stale 403 does not', async () => {
+      const store = useNotificationStore()
+      const authStore = useAuthStore()
+      authStore.chargeSession = { token: 't', user: { name: 'Charge', account: 'c', station: 'S1', system: 'charge' } }
+      vi.mocked(fetchChargeTasks).mockResolvedValue([])
+      const runtimeAuthStore = { getSystemSession: ((system: string) => system === 'charge' ? authStore.chargeSession : null) as any, clearSession: vi.fn() }
+      await initializeNotificationRuntime({ notificationStore: store, authStore: runtimeAuthStore, onOpenSystem: vi.fn() })
+      const task = { serialNumber: 9, deviceCode: 'D', station: 'S1', status: 'pending', faultDescription: 'f', faultType: 'x', resolutionType: 0, isDisable: false, createdAt: 'now', updatedAt: 'now' } as ChargeTask
+      store.setChargeSnapshot([task]); store.setChargeRuntimeState(true)
+      vi.mocked(completeChargeTask).mockRejectedValueOnce({ status: 403, message: 'forbidden' })
+      await expect(store.completeChargeTask(9)).rejects.toMatchObject({ status: 403 })
+      expect(authStore.getSystemSession('charge')).toBeNull()
+      expect(getChargeNotificationController()?.isUsable()).toBe(false)
+      expect(store.chargeRuntimeActive).toBe(false)
+      expect(store.chargeRequestInFlight).toBe(false)
+      authStore.chargeSession = { token: 't2', user: { name: 'Charge', account: 'c', station: 'S1', system: 'charge' } }
+      store.setChargeSnapshot([task]); store.setChargeRuntimeState(true)
+      const controller = getChargeNotificationController()
+      controller?.reconcile({ enabled: true, intervalMs: 1000, token: 't2', station: 'S1' })
+      let rejectStale!: (error: unknown) => void
+      vi.mocked(completeChargeTask).mockReturnValueOnce(new Promise((_, reject) => { rejectStale = reject }))
+      const staleCompletion = store.completeChargeTask(9)
+      controller?.invalidate()
+      rejectStale({ status: 403, message: 'stale' })
+      await expect(staleCompletion).rejects.toMatchObject({ status: 403 })
+      expect(authStore.getSystemSession('charge')?.token).toBe('t2')
+    })
+
+    test('idle successful charge completion performs exactly one authoritative fetch', async () => {
+      const store = useNotificationStore(); const authStore = useAuthStore()
+      authStore.chargeSession = { token: 't', user: { name: 'Charge', account: 'c', station: 'S1', system: 'charge' } }
+      store.chargePollingEnabled = false
+      vi.mocked(fetchChargeTasks).mockResolvedValue([])
+      const runtimeAuthStore = { getSystemSession: ((system: string) => system === 'charge' ? authStore.chargeSession : null) as any, clearSession: vi.fn() }
+      await initializeNotificationRuntime({ notificationStore: store, authStore: runtimeAuthStore, onOpenSystem: vi.fn() })
+      store.setChargePollingEnabled(true)
+      await vi.waitFor(() => expect(fetchChargeTasks).toHaveBeenCalledTimes(1))
+      const task = { serialNumber: 12, deviceCode: 'D', station: 'S1', status: 'pending', faultDescription: 'f', faultType: 'x', resolutionType: 0, isDisable: false, createdAt: 'now', updatedAt: 'now' } as ChargeTask
+      store.setChargeSnapshot([task]); store.setChargeRuntimeState(true)
+      vi.mocked(completeChargeTask).mockResolvedValueOnce(undefined)
+      await store.completeChargeTask(12)
+      await vi.waitFor(() => expect(fetchChargeTasks).toHaveBeenCalledTimes(2))
+      expect(store.chargeTasksSnapshot).toEqual([])
+    })
+
+    test('charge runtime teardown clears active and request state', async () => {
+      const store = useNotificationStore(); const authStore = useAuthStore()
+      authStore.chargeSession = { token: 't', user: { name: 'Charge', account: 'c', station: 'S1', system: 'charge' } }
+      const runtimeAuthStore = { getSystemSession: ((system: string) => system === 'charge' ? authStore.chargeSession : null) as any, clearSession: vi.fn() }
+      await initializeNotificationRuntime({ notificationStore: store, authStore: runtimeAuthStore, onOpenSystem: vi.fn() })
+      store.setChargeRuntimeState(true); store.setChargeRequestState(true)
+      teardownNotificationRuntime()
+      expect(store.chargeRuntimeActive).toBe(false)
+      expect(store.chargeRequestInFlight).toBe(false)
+    })
+
+    test('polling 403 cleanup is charge-only and stale old-credential 403 preserves new charge session', async () => {
+      const store = useNotificationStore(); const authStore = useAuthStore()
+      authStore.lmaSession = { token: 'lma', user: { name: 'LMA', stationId: 'A', sectionId: null, role: 'staff' } }
+      authStore.canSession = { token: 'can', user: { name: 'CAN', station: 'C', topic: 'cleaning' } }
+      authStore.chargeSession = { token: 'old', user: { name: 'Charge', account: 'c', station: 'S1', system: 'charge' } }
+      store.chargePollingEnabled = true
+      vi.mocked(fetchChargeTasks).mockRejectedValueOnce({ status: 403, message: 'forbidden' })
+      const runtimeAuthStore = { getSystemSession: ((system: string) => authStore.getSystemSession(system as any)) as any, clearSession: (system: 'charge') => authStore.clearSession(system) }
+      await initializeNotificationRuntime({ notificationStore: store, authStore: runtimeAuthStore, onOpenSystem: vi.fn() })
+      await vi.waitFor(() => expect(authStore.getSystemSession('charge')).toBeNull())
+      expect(authStore.getSystemSession('lma')?.token).toBe('lma')
+      expect(authStore.getSystemSession('can')?.token).toBe('can')
+
+      authStore.chargeSession = { token: 'new', user: { name: 'Charge', account: 'c', station: 'S1', system: 'charge' } }
+      const controller = getChargeNotificationController()!
+      controller.reconcile({ enabled: true, intervalMs: 1000, token: 'old', station: 'S1' })
+      let rejectOld!: (error: unknown) => void
+      vi.mocked(fetchChargeTasks).mockReturnValueOnce(new Promise((_, reject) => { rejectOld = reject }))
+      void controller.trigger()
+      controller.reconcile({ enabled: true, intervalMs: 1000, token: 'new', station: 'S1' })
+      rejectOld({ status: 403, message: 'stale' })
+      await Promise.resolve(); await Promise.resolve()
+      expect(authStore.getSystemSession('charge')?.token).toBe('new')
+    })
+
+    test('concurrent charge completion is single-flight and failed completion does not refresh', async () => {
+      const store = useNotificationStore(); const authStore = useAuthStore()
+      authStore.chargeSession = { token: 't', user: { name: 'Charge', account: 'c', station: 'S1', system: 'charge' } }
+      const task = { serialNumber: 10, deviceCode: 'D', station: 'S1', status: 'pending', faultDescription: 'f', faultType: 'x', resolutionType: 0, isDisable: false, createdAt: 'now', updatedAt: 'now' } as ChargeTask
+      const runtimeAuthStore = { getSystemSession: ((system: string) => system === 'charge' ? authStore.chargeSession : null) as any, clearSession: vi.fn() }
+      await initializeNotificationRuntime({ notificationStore: store, authStore: runtimeAuthStore, onOpenSystem: vi.fn() })
+      store.setChargeSnapshot([task])
+      let reject!: (error: Error) => void
+      vi.mocked(completeChargeTask).mockReturnValueOnce(new Promise((_, r) => { reject = r }))
+      const first = store.completeChargeTask(10)
+      await expect(store.completeChargeTask(10)).rejects.toThrow('正在處理中')
+      reject(new Error('offline'))
+      await expect(first).rejects.toThrow('offline')
+      expect(completeChargeTask).toHaveBeenCalledTimes(1)
+    })
+
+    test('idle non-403 completion failure performs zero authoritative refreshes and preserves state', async () => {
+      const store = useNotificationStore(); const authStore = useAuthStore()
+      authStore.chargeSession = { token: 't', user: { name: 'Charge', account: 'c', station: 'S1', system: 'charge' } }
+      store.chargePollingEnabled = false
+      vi.mocked(fetchChargeTasks).mockResolvedValue([])
+      const runtimeAuthStore = { getSystemSession: ((system: string) => system === 'charge' ? authStore.chargeSession : null) as any, clearSession: vi.fn() }
+      await initializeNotificationRuntime({ notificationStore: store, authStore: runtimeAuthStore, onOpenSystem: vi.fn() })
+      store.setChargePollingEnabled(true)
+      await vi.waitFor(() => expect(fetchChargeTasks).toHaveBeenCalledTimes(1))
+      const task = { serialNumber: 11, deviceCode: 'D', station: 'S1', status: 'pending', faultDescription: 'f', faultType: 'x', resolutionType: 0, isDisable: false, createdAt: 'now', updatedAt: 'now' } as ChargeTask
+      store.setChargeSnapshot([task]); store.setChargeRuntimeState(true)
+      vi.mocked(completeChargeTask).mockRejectedValueOnce(new Error('offline'))
+      await expect(store.completeChargeTask(11)).rejects.toThrow('offline')
+      expect(fetchChargeTasks).toHaveBeenCalledTimes(1)
+      expect(store.chargeTasksSnapshot).toEqual([task])
+      expect(store.notifications.find(n => n.id === 'charge:11')?.status).not.toBe('dismissed')
+    })
     test('real CAN completion fences deferred poll and performs one authoritative refresh', async () => {
       const store = useNotificationStore()
       const authStore = useAuthStore()

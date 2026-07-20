@@ -7,6 +7,7 @@ import {
   teardownNotificationRuntime,
   getLmaNotificationController,
   getCanNotificationController,
+  getChargeNotificationController,
 } from '@/services/lmaNotificationRuntime'
 import { fetchNotifications } from '@/services/notificationDataSource'
 import { useAuthStore } from '@/stores/authStore'
@@ -150,6 +151,62 @@ describe('LMA notification runtime', () => {
     await initializeNotificationRuntime(options)
     expect(notificationStore.loadFromStorage).toHaveBeenCalledTimes(2)
     expect(listen).toHaveBeenCalledTimes(5)
+  })
+
+  test('deferred listener teardown leaves no charge resources and retry installs exactly one set', async () => {
+    let resolveFirst!: (unlisten: () => void) => void
+    const staleUnlisten = vi.fn()
+    vi.mocked(listen).mockReturnValueOnce(new Promise(resolve => { resolveFirst = resolve }))
+    const authStore = {
+      getSystemSession: vi.fn((system: string) => system === 'charge'
+        ? { token: 'charge-token', user: { station: 'S1' } }
+        : null),
+    }
+    const notificationStore = {
+      pollingEnabled: false, pollingIntervalMs: 1000,
+      canPollingEnabled: false, canPollingIntervalMs: 1000,
+      chargePollingEnabled: true, chargePollingIntervalMs: 1000,
+      loadFromStorage: vi.fn(), handleNewNotifications: vi.fn(),
+      setChargeRuntimeState: vi.fn(), setChargeRequestState: vi.fn(),
+      setChargeSnapshot: vi.fn(), setChargePollingError: vi.fn(), clearChargeState: vi.fn(),
+    }
+    const pending = initializeNotificationRuntime({ notificationStore, authStore: authStore as never, onOpenSystem: vi.fn() })
+    teardownNotificationRuntime()
+    resolveFirst(staleUnlisten)
+    await pending
+    expect(getChargeNotificationController()).toBeNull()
+    expect(vi.getTimerCount()).toBe(0)
+    expect(staleUnlisten).toHaveBeenCalledTimes(1)
+
+    vi.mocked(listen).mockResolvedValue(() => {})
+    await initializeNotificationRuntime({ notificationStore, authStore: authStore as never, onOpenSystem: vi.fn() })
+    expect(getChargeNotificationController()).not.toBeNull()
+    expect(vi.getTimerCount()).toBe(1)
+    expect(vi.mocked(listen)).toHaveBeenCalledTimes(4)
+  })
+
+  test('routes charge through the main-window listener boundary and refuses unknown systems', async () => {
+    const listeners: Array<(event: { payload: { system?: unknown } }) => void> = []
+    vi.mocked(listen).mockImplementation(async (_event, callback) => {
+      listeners.push(callback as (event: { payload: { system?: unknown } }) => void)
+      return () => {}
+    })
+    const onOpenSystem = vi.fn()
+    const notificationStore = {
+      pollingEnabled: false,
+      pollingIntervalMs: 1000,
+      loadFromStorage: vi.fn(),
+      handleNewNotifications: vi.fn(),
+    }
+    const authStore = { getSystemSession: vi.fn(() => null) }
+
+    await initializeNotificationRuntime({ notificationStore, authStore, onOpenSystem })
+    listeners[2]!({ payload: { system: 'charge' } })
+    listeners[2]!({ payload: { system: 'can' } })
+    listeners[2]!({ payload: { system: 'unknown' } })
+    listeners[2]!({ payload: {} })
+
+    expect(onOpenSystem.mock.calls.map(([system]) => system)).toEqual(['charge', 'can', 'lma'])
   })
 
   test('failed initialization keeps settings and manual refresh off the legacy poller until retry', async () => {

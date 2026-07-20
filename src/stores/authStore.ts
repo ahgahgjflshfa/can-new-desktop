@@ -3,14 +3,18 @@ import { logAppEvent } from '@/services/appLogger'
 import { setApiAuthTokenProvider } from '@/services/apiClient'
 import { loginWithPassword, logoutWithToken } from '@/services/authService'
 import { canLoginWithPassword } from '@/services/canAuthService'
+import { chargeLoginWithPassword, CHARGE_LOGIN_ERROR, isChargeLoginValidationError } from '@/services/chargeAuthService'
 import type { AuthUser } from '@/types/auth'
 import type { CanAuthUser } from '@/types/can'
+import type { ChargeAuthUser } from '@/types/charge'
+import type { SystemType } from '@/types/system'
 
 const AUTH_STORAGE_KEY = 'tauri-app:auth'
 const LMA_AUTH_STORAGE_KEY = 'tauri-app:auth:lma'
 const CAN_AUTH_STORAGE_KEY = 'tauri-app:auth:can'
+const CHARGE_AUTH_STORAGE_KEY = 'tauri-app:auth:charge'
 
-type SystemType = 'lma' | 'can'
+export type { SystemType } from '@/types/system'
 
 function getLoginErrorMessage(err: unknown): string {
   const rawMessage = err instanceof Error ? err.message : String(err ?? '')
@@ -47,11 +51,23 @@ interface CanStoredAuthState {
   token: string
   user: CanAuthUser
 }
+interface ChargeStoredAuthState {
+  token: string
+  user: ChargeAuthUser
+}
+function sessionForSystem(state: { lmaSession: LmaStoredAuthState | null; canSession: CanStoredAuthState | null; chargeSession: ChargeStoredAuthState | null }, system: SystemType) {
+  switch (system) {
+    case 'lma': return state.lmaSession
+    case 'can': return state.canSession
+    case 'charge': return state.chargeSession
+  }
+}
 
 export const useAuthStore = defineStore('auth', {
   state: () => ({
     lmaSession: null as LmaStoredAuthState | null,
     canSession: null as CanStoredAuthState | null,
+    chargeSession: null as ChargeStoredAuthState | null,
     currentSystem: 'lma' as SystemType,
     isHydrated: false,
     isSubmitting: false,
@@ -59,18 +75,12 @@ export const useAuthStore = defineStore('auth', {
   }),
 
   getters: {
-    token: state => (state.currentSystem === 'lma' ? state.lmaSession : state.canSession)?.token ?? null,
-    user: state => (state.currentSystem === 'lma' ? state.lmaSession : state.canSession)?.user ?? null,
-    isAuthenticated: state => Boolean((state.currentSystem === 'lma' ? state.lmaSession : state.canSession)?.token),
-    displayName: state => (state.currentSystem === 'lma' ? state.lmaSession : state.canSession)?.user.name ?? '',
-    getSystemSession: state => (system: SystemType) => {
-      const session = system === 'lma' ? state.lmaSession : state.canSession
-      return session
-    },
-    isSystemAuthenticated: state => (system: SystemType) => {
-      const session = system === 'lma' ? state.lmaSession : state.canSession
-      return Boolean(session?.token)
-    },
+    token: state => sessionForSystem(state, state.currentSystem)?.token ?? null,
+    user: state => sessionForSystem(state, state.currentSystem)?.user ?? null,
+    isAuthenticated: state => Boolean(sessionForSystem(state, state.currentSystem)?.token),
+    displayName: state => sessionForSystem(state, state.currentSystem)?.user.name ?? '',
+    getSystemSession: state => (system: SystemType) => sessionForSystem(state, system),
+    isSystemAuthenticated: state => (system: SystemType) => Boolean(sessionForSystem(state, system)?.token),
   },
 
   actions: {
@@ -97,7 +107,7 @@ export const useAuthStore = defineStore('auth', {
             stationId: result.user.stationId,
             role: result.user.role,
           })
-        } else {
+        } else if (system === 'can') {
           const result = await canLoginWithPassword(account, password)
           this.canSession = { token: result.token, user: result.user }
           this.currentSystem = 'can'
@@ -108,10 +118,23 @@ export const useAuthStore = defineStore('auth', {
             station: result.user.station,
             topic: result.user.topic,
           })
+        } else {
+          const result = await chargeLoginWithPassword(account, password)
+          this.chargeSession = { token: result.token, user: result.user }
+          this.currentSystem = 'charge'
+          this.selectSystem('charge')
+          this.persistSession('charge')
         }
         setApiAuthTokenProvider(() => this.token)
       } catch (err) {
-        this.lastError = getLoginErrorMessage(err)
+        const chargeValidationFailure = system === 'charge' && isChargeLoginValidationError(err)
+        this.lastError = chargeValidationFailure ? CHARGE_LOGIN_ERROR : getLoginErrorMessage(err)
+        if (chargeValidationFailure) {
+          this.clearSession('charge')
+          // clearSession intentionally resets errors for normal logout; retain the
+          // actionable mismatch message after targeted validation cleanup.
+          this.lastError = CHARGE_LOGIN_ERROR
+        }
         logAppEvent('error', 'auth', `${system} login failed`, err)
         throw err
       } finally {
@@ -156,7 +179,8 @@ export const useAuthStore = defineStore('auth', {
     clearSession(system?: SystemType) {
       const targetSystem = system ?? this.currentSystem
       if (targetSystem === 'lma') this.lmaSession = null
-      else this.canSession = null
+      else if (targetSystem === 'can') this.canSession = null
+      else this.chargeSession = null
       this.clearStorage(targetSystem)
       if (targetSystem === this.currentSystem) this.selectSystem(targetSystem)
       this.lastError = null
@@ -182,13 +206,16 @@ export const useAuthStore = defineStore('auth', {
 
       this.loadSystemFromStorage('lma')
       this.loadSystemFromStorage('can')
+      this.loadSystemFromStorage('charge')
       this.selectSystem(this.currentSystem)
     },
 
     loadSystemFromStorage(system: SystemType) {
       if (typeof localStorage === 'undefined') return
 
-      const key = system === 'lma' ? LMA_AUTH_STORAGE_KEY : CAN_AUTH_STORAGE_KEY
+      const key = system === 'lma'
+        ? LMA_AUTH_STORAGE_KEY
+        : system === 'can' ? CAN_AUTH_STORAGE_KEY : CHARGE_AUTH_STORAGE_KEY
       const raw = localStorage.getItem(key)
       if (!raw) return
 
@@ -198,15 +225,29 @@ export const useAuthStore = defineStore('auth', {
       } catch (err) {
         logAppEvent('warn', 'auth', `failed to parse ${system} auth state`, err)
         console.warn(`failed to parse ${system} auth state`, err)
+        if (system === 'charge') this.clearStorage('charge')
         return
       }
 
       if (typeof parsed !== 'object' || parsed === null) return
 
       const record = parsed as Record<string, unknown>
-      if (typeof record.token === 'string' && record.token.length > 0 && record.user) {
-        if (system === 'lma') this.lmaSession = { token: record.token, user: record.user as AuthUser }
-        else this.canSession = { token: record.token, user: record.user as CanAuthUser }
+      if (typeof record.token !== 'string' || !record.token.trim() || !record.user) {
+        if (system === 'charge') this.clearStorage('charge')
+        return
+      }
+      if (system === 'lma') this.lmaSession = { token: record.token, user: record.user as AuthUser }
+      else if (system === 'can') this.canSession = { token: record.token, user: record.user as CanAuthUser }
+      else {
+        const user = record.user as Partial<ChargeAuthUser>
+        if (typeof user.station === 'string' && user.station.trim() && user.system === 'charge') {
+          this.chargeSession = {
+            token: record.token.trim(),
+            user: { ...user, station: user.station.trim() } as ChargeAuthUser,
+          }
+        } else {
+          this.clearStorage('charge')
+        }
       }
     },
 
@@ -222,7 +263,9 @@ export const useAuthStore = defineStore('auth', {
         return
       }
 
-      const key = system === 'lma' ? LMA_AUTH_STORAGE_KEY : CAN_AUTH_STORAGE_KEY
+      const key = system === 'lma'
+        ? LMA_AUTH_STORAGE_KEY
+        : system === 'can' ? CAN_AUTH_STORAGE_KEY : CHARGE_AUTH_STORAGE_KEY
 
       try {
         localStorage.setItem(
@@ -244,7 +287,9 @@ export const useAuthStore = defineStore('auth', {
 
     clearStorage(system: SystemType) {
       if (typeof localStorage === 'undefined') return
-      const key = system === 'lma' ? LMA_AUTH_STORAGE_KEY : CAN_AUTH_STORAGE_KEY
+      const key = system === 'lma'
+        ? LMA_AUTH_STORAGE_KEY
+        : system === 'can' ? CAN_AUTH_STORAGE_KEY : CHARGE_AUTH_STORAGE_KEY
       try {
         localStorage.removeItem(key)
       } catch (err) {

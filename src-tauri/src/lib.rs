@@ -7,6 +7,7 @@ mod auth_commands;
 mod camera_viewer_commands;
 mod can_api_client;
 mod can_commands;
+mod charge_commands;
 mod constants;
 mod device_id;
 mod ipc_types;
@@ -24,6 +25,7 @@ use state::{MinimizeToTrayState, PendingNotificationState};
 pub use auth_commands::{auth_login, auth_logout};
 pub use camera_viewer_commands::open_camera_viewer;
 pub use can_commands::{can_complete_task, can_fetch_tasks, can_login};
+pub use charge_commands::{charge_complete_task, charge_fetch_tasks, charge_login};
 pub use device_id::get_or_create_device_id;
 pub use log_commands::export_app_logs;
 pub use popup_commands::{
@@ -92,6 +94,9 @@ pub fn run() {
             can_login,
             can_fetch_tasks,
             can_complete_task,
+            charge_login,
+            charge_fetch_tasks,
+            charge_complete_task,
             open_camera_viewer,
             fetch_tasks,
             reply_task,

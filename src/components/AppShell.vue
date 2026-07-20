@@ -4,6 +4,8 @@ import { useSystemStore } from '@/stores/systemStore'
 import { useAuthStore } from '@/stores/authStore'
 import type { AuthUser } from '@/types/auth'
 import type { CanAuthUser } from '@/types/can'
+import type { ChargeAuthUser } from '@/types/charge'
+import type { SystemType } from '@/types/system'
 
 const systemStore = useSystemStore()
 const authStore = useAuthStore()
@@ -11,6 +13,7 @@ const authStore = useAuthStore()
 const navItems = [
   { id: 'lma', label: '立碼幫幫忙', shortLabel: '立碼', icon: 'i-mdi-headset' },
   { id: 'can', label: 'Q 潔淨立馬清', shortLabel: 'Q潔', icon: 'i-mdi-broom' },
+  { id: 'charge', label: '無線充故障', shortLabel: '無線充故障', icon: 'i-mdi-ev-station' },
   { id: 'settings', label: '偏好設定', shortLabel: '偏好', icon: 'i-mdi-cog-outline' },
 ] as const
 
@@ -18,15 +21,16 @@ const currentNavItem = computed(() => navItems.find(item => item.id === systemSt
 
 const userInitial = computed(() => authStore.user?.name?.trim().charAt(0).toUpperCase() ?? 'A')
 
-function isLmaUser(user: AuthUser | CanAuthUser | null): user is AuthUser {
+function isLmaUser(user: AuthUser | CanAuthUser | ChargeAuthUser | null): user is AuthUser {
   return Boolean(user && 'stationId' in user)
 }
 
-function isCanUser(user: AuthUser | CanAuthUser | null): user is CanAuthUser {
-  return Boolean(user && 'station' in user)
+function isCanUser(user: AuthUser | CanAuthUser | ChargeAuthUser | null): user is CanAuthUser {
+  return Boolean(user && 'station' in user && (!('system' in user) || user.system !== 'charge'))
 }
 
 const userMeta = computed(() => {
+  if (authStore.currentSystem === 'charge' && authStore.user && 'station' in authStore.user) return authStore.user.station
   if (isCanUser(authStore.user)) {
     return authStore.user.station
   }
@@ -36,7 +40,7 @@ const userMeta = computed(() => {
   return '車站服務'
 })
 
-function setView(view: typeof systemStore.currentView) {
+function setView(view: SystemType | 'settings') {
   systemStore.switchView(view)
 }
 
@@ -100,6 +104,8 @@ function setView(view: typeof systemStore.currentView) {
                     ? 'bg-[var(--app-success)]'
                     : item.id === 'can' && systemStore.isCanAuthenticated
                       ? 'bg-[var(--app-success)]'
+                      : item.id === 'charge' && authStore.isSystemAuthenticated('charge')
+                        ? 'bg-[var(--app-success)]'
                       : 'bg-[var(--app-muted-2)]',
                 ]"
               />

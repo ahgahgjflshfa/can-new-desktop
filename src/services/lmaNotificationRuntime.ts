@@ -2,8 +2,13 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { watch, type WatchStopHandle } from 'vue'
 import { fetchNotifications } from '@/services/notificationDataSource'
 import { logAppEvent } from '@/services/appLogger'
+import { isSystemType } from '@/types/system'
+import type { SystemType } from '@/types/system'
 import { CanNotificationController } from '@/services/canNotificationRuntime'
 import type { CanTask } from '@/types/can'
+import { ChargeNotificationController } from '@/services/chargeNotificationRuntime'
+import type { ChargeRuntimeContext } from '@/services/chargeNotificationRuntime'
+import type { ChargeTask } from '@/types/charge'
 
 export interface LmaRuntimeCallbacks {
   onSnapshot: (notifications: Awaited<ReturnType<typeof fetchNotifications>>['notifications']) => void
@@ -128,7 +133,7 @@ export class LmaNotificationController {
 
 interface RuntimeStore {
   loadFromStorage: () => void
-  handleNewNotifications: (notifications: Awaited<ReturnType<typeof fetchNotifications>>['notifications'], system?: 'lma' | 'can') => void
+  handleNewNotifications: (notifications: Awaited<ReturnType<typeof fetchNotifications>>['notifications'], system?: Exclude<SystemType, 'charge'>) => void
   setLmaRuntimeState?: (active: boolean) => void
   setPollingError?: (error: string | null) => void
   handleDismissEvent?: (payload: { notificationId: string | null; dismissAll: boolean }) => void
@@ -143,7 +148,14 @@ interface RuntimeStore {
   setCanPollingError?: (error: string | null) => void
   setCanRequestState?: (inFlight: boolean) => void
   clearCanSnapshot?: () => void
-  getSystemSession?: (system: 'lma' | 'can') => { token: string } | null
+  chargePollingEnabled?: boolean
+  chargePollingIntervalMs?: number
+  setChargeSnapshot?: (tasks: ChargeTask[], context?: ChargeRuntimeContext) => void
+  setChargePollingError?: (error: string | null, context?: ChargeRuntimeContext) => void
+  setChargeRuntimeState?: (active: boolean, context?: ChargeRuntimeContext) => void
+  setChargeRequestState?: (inFlight: boolean, context?: ChargeRuntimeContext) => void
+  clearChargeState?: () => void
+  getSystemSession?: (system: Exclude<SystemType, 'charge'>) => { token: string } | null
 }
 
 let initializationPromise: Promise<void> | null = null
@@ -156,11 +168,24 @@ let runtimeWatchStop: WatchStopHandle | null = null
 let canRuntimeController: CanNotificationController | null = null
 let canRuntimeReconcile: (() => void) | null = null
 let canRuntimeWatchStop: WatchStopHandle | null = null
+let chargeRuntimeController: ChargeNotificationController | null = null
+let chargeRuntimeWatchStop: WatchStopHandle | null = null
 let previousCanCredentials = { token: null as string | null, station: null as string | null }
+let previousChargeCredentials = { token: null as string | null, station: null as string | null }
 
-function getCanStation(authStore: { getSystemSession: (system: 'lma' | 'can') => { token: string; user?: unknown } | null }): string | null {
+function getCanStation(authStore: { getSystemSession: (system: Exclude<SystemType, 'charge'>) => { token: string; user?: unknown } | null }): string | null {
   const user = authStore.getSystemSession('can')?.user
   return user && typeof user === 'object' && 'station' in user && typeof user.station === 'string' ? user.station : null
+}
+function getChargeStation(authStore: { getSystemSession: (system: Exclude<SystemType, 'charge'>) => { token: string; user?: unknown } | null }): string | null {
+  const getSession = authStore.getSystemSession as unknown as (system: SystemType) => { token: string; user?: unknown } | null
+  const user = getSession('charge')?.user
+  return user && typeof user === 'object' && 'station' in user && typeof user.station === 'string' ? user.station.trim() || null : null
+}
+function chargeContextCurrent(context: ChargeRuntimeContext, authStore: { getSystemSession: (system: Exclude<SystemType, 'charge'>) => { token: string; user?: unknown } | null }): boolean {
+  const getSession = authStore.getSystemSession as unknown as (system: SystemType) => { token: string; user?: unknown } | null
+  return context.controller === chargeRuntimeController && context.generation === context.controller.getGeneration() &&
+    context.token === getSession('charge')?.token?.trim() && context.station === getChargeStation(authStore)
 }
 let runtimeUnlisteners: UnlistenFn[] = []
 
@@ -171,6 +196,8 @@ export function getLmaNotificationController(): LmaNotificationController | null
 export function teardownNotificationRuntime(): void {
   runtimeEpoch++
   canRuntimeController?.teardown()
+  chargeRuntimeController?.teardown()
+  chargeRuntimeController = null
   canRuntimeController = null
   runtimeController?.teardown()
   runtimeController = null
@@ -180,8 +207,11 @@ export function teardownNotificationRuntime(): void {
   runtimeWatchStop = null
   canRuntimeWatchStop?.()
   canRuntimeWatchStop = null
+  chargeRuntimeWatchStop?.()
+  chargeRuntimeWatchStop = null
   canRuntimeReconcile = null
   previousCanCredentials = { token: null, station: null }
+  previousChargeCredentials = { token: null, station: null }
   runtimeReconcile = null
   for (const unlisten of runtimeUnlisteners.splice(0)) unlisten()
   initializationPromise = null
@@ -190,8 +220,8 @@ export function teardownNotificationRuntime(): void {
 
 export function initializeNotificationRuntime(options: {
   notificationStore: RuntimeStore
-  authStore: { getSystemSession: (system: 'lma' | 'can') => { token: string; user?: unknown } | null }
-  onOpenSystem: (system: 'lma' | 'can') => void
+  authStore: { getSystemSession: (system: Exclude<SystemType, 'charge'>) => { token: string; user?: unknown } | null }
+  onOpenSystem: (system: SystemType) => void
 }): Promise<void> {
   runtimeManaged = true
   if (initializationPromise) return initializationPromise
@@ -215,6 +245,22 @@ export function initializeNotificationRuntime(options: {
       onRequestStarted: () => notificationStore.setCanRequestState?.(true),
       onRequestFinished: () => notificationStore.setCanRequestState?.(false),
     })
+    chargeRuntimeController = new ChargeNotificationController({
+      onSnapshot: (tasks, context) => { if (chargeContextCurrent(context, authStore)) notificationStore.setChargeSnapshot?.(tasks, context) },
+      onError: (error, context) => { if (chargeContextCurrent(context, authStore)) notificationStore.setChargePollingError?.(error.message, context) },
+      onForbidden: context => {
+        if (!chargeContextCurrent(context, authStore)) return
+        notificationStore.clearChargeState?.()
+        ;(authStore as unknown as { clearSession: (system: 'charge') => void }).clearSession('charge')
+      },
+      onRequestStarted: context => { if (chargeContextCurrent(context, authStore)) notificationStore.setChargeRequestState?.(true, context) },
+      onRequestFinished: context => { if (chargeContextCurrent(context, authStore)) notificationStore.setChargeRequestState?.(false, context) },
+      onStopped: context => {
+        if (context.controller !== chargeRuntimeController || context.generation !== context.controller.getGeneration()) return
+        if (!context.token || chargeContextCurrent(context, authStore)) notificationStore.setChargeRuntimeState?.(false, context)
+      },
+      onStarted: context => { if (chargeContextCurrent(context, authStore)) notificationStore.setChargeRuntimeState?.(true, context) },
+    })
 
     try {
       const dismissUnlisten = await listen<{ notificationId: string | null; dismissAll: boolean }>('dismiss-notification', event => {
@@ -227,8 +273,15 @@ export function initializeNotificationRuntime(options: {
       })
       if (epoch !== runtimeEpoch) { popupClosedUnlisten(); return }
       runtimeUnlisteners.push(popupClosedUnlisten)
-      const openUnlisten = await listen<{ system?: 'lma' | 'can' }>('open-notification-system', event => {
-        if (event.payload.system === 'lma' || event.payload.system === 'can') options.onOpenSystem(event.payload.system)
+      const openUnlisten = await listen<{ system?: unknown }>('open-notification-system', event => {
+        const system = event.payload.system
+        if (system === undefined) {
+          options.onOpenSystem('lma')
+        } else if (isSystemType(system)) {
+          options.onOpenSystem(system)
+        } else {
+          logAppEvent('warn', 'notifications', 'refused open-system event with unknown system', { system })
+        }
       })
       if (epoch !== runtimeEpoch) { openUnlisten(); return }
       runtimeUnlisteners.push(openUnlisten)
@@ -246,6 +299,8 @@ export function initializeNotificationRuntime(options: {
       runtimeController = null
       canRuntimeController?.teardown()
       canRuntimeController = null
+      chargeRuntimeController?.teardown()
+      chargeRuntimeController = null
       initializationPromise = null
       throw error
     }
@@ -280,6 +335,26 @@ export function initializeNotificationRuntime(options: {
       canReconcile,
       { immediate: true },
     )
+    chargeRuntimeWatchStop = watch(
+      () => [getChargeStation(authStore), notificationStore.chargePollingEnabled ?? false, notificationStore.chargePollingIntervalMs ?? 10000,
+        (authStore.getSystemSession as unknown as (system: SystemType) => { token: string } | null)('charge')?.token ?? null],
+      () => {
+        const getSession = authStore.getSystemSession as unknown as (system: SystemType) => { token: string } | null
+        const token = getSession('charge')?.token ?? null
+        const station = getChargeStation(authStore)
+        if (previousChargeCredentials.token !== token || previousChargeCredentials.station !== station) {
+          notificationStore.clearChargeState?.()
+          previousChargeCredentials = { token, station }
+        }
+        chargeRuntimeController?.reconcile({
+          enabled: notificationStore.chargePollingEnabled ?? false,
+          intervalMs: notificationStore.chargePollingIntervalMs ?? 10000,
+          token,
+          station,
+        })
+      },
+      { immediate: true },
+    )
     reconcile()
     runtimeStop = () => runtimeController?.teardown()
   })()
@@ -293,7 +368,9 @@ export function reconcileLmaNotificationRuntime(): void {
 
 export function reconcileCanNotificationRuntime(): void { canRuntimeReconcile?.() }
 export function getCanNotificationController(): CanNotificationController | null { return canRuntimeController }
+export function getChargeNotificationController(): ChargeNotificationController | null { return chargeRuntimeController }
 export async function triggerCanNotificationRuntime(): Promise<void> { await canRuntimeController?.trigger() }
+export async function triggerChargeNotificationRuntime(): Promise<void> { await chargeRuntimeController?.trigger() }
 
 export function isLmaNotificationRuntimeManaged(): boolean {
   return runtimeManaged

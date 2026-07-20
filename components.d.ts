@@ -14,6 +14,8 @@ declare module 'vue' {
     AppShell: typeof import('./src/components/AppShell.vue')['default']
     CanLoginView: typeof import('./src/components/CanLoginView.vue')['default']
     CanTaskView: typeof import('./src/components/CanTaskView.vue')['default']
+    ChargeLoginView: typeof import('./src/components/ChargeLoginView.vue')['default']
+    ChargeTaskView: typeof import('./src/components/ChargeTaskView.vue')['default']
     HomeView: typeof import('./src/components/HomeView.vue')['default']
     LoginView: typeof import('./src/components/LoginView.vue')['default']
     ManagedStreamPlayer: typeof import('./src/components/stream/ManagedStreamPlayer.vue')['default']

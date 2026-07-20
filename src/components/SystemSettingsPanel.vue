@@ -6,8 +6,8 @@ import { useAuthStore } from '@/stores/authStore'
 import { useNotificationStore } from '@/stores/notificationStore'
 import type { AuthUser } from '@/types/auth'
 import type { CanAuthUser } from '@/types/can'
-
-type SystemType = 'lma' | 'can'
+import type { ChargeAuthUser } from '@/types/charge'
+import type { SystemType } from '@/types/system'
 
 const props = defineProps<{
   system: SystemType
@@ -30,37 +30,65 @@ const intervalOptions = [
   { value: 300, label: '5 分鐘' },
 ]
 
-const systemName = computed(() => (props.system === 'lma' ? '立碼幫幫忙' : 'Q 潔淨立馬清'))
+function getSystemName(system: SystemType): string {
+  switch (system) {
+    case 'lma': return '立碼幫幫忙'
+    case 'can': return 'Q 潔淨立馬清'
+    case 'charge': return '無線充故障'
+  }
+}
+
+const systemName = computed(() => getSystemName(props.system))
 const storageKey = computed(() => `tauri-app:auth:${props.system}`)
 const pollingEnabled = computed({
-  get: () => (props.system === 'lma' ? notificationStore.pollingEnabled : notificationStore.canPollingEnabled),
-  set: value => {
-    if (props.system === 'lma') {
-      notificationStore.setPollingEnabled(value)
-      return
+  get: () => {
+    switch (props.system) {
+      case 'lma': return notificationStore.pollingEnabled
+      case 'can': return notificationStore.canPollingEnabled
+      case 'charge': return notificationStore.chargePollingEnabled
     }
-    notificationStore.setCanPollingEnabled(value)
+  },
+  set: value => {
+    switch (props.system) {
+      case 'lma': notificationStore.setPollingEnabled(value); break
+      case 'can': notificationStore.setCanPollingEnabled(value); break
+      case 'charge': notificationStore.setChargePollingEnabled(value); break
+    }
   },
 })
-const pollingIntervalSeconds = computed(() =>
-  props.system === 'lma' ? notificationStore.pollingIntervalSeconds : notificationStore.canPollingIntervalSeconds
-)
-const isPolling = computed(() =>
-  props.system === 'lma' ? notificationStore.isPolling : notificationStore.isCanPolling
-)
-const runtimeError = computed(() =>
-  props.system === 'lma' ? notificationStore.lastError : notificationStore.canPollingLastError
-)
+const pollingIntervalSeconds = computed(() => {
+  switch (props.system) {
+    case 'lma': return notificationStore.pollingIntervalSeconds
+    case 'can': return notificationStore.canPollingIntervalSeconds
+    case 'charge': return notificationStore.chargePollingIntervalSeconds
+  }
+})
+const isPolling = computed(() => {
+  switch (props.system) {
+    case 'lma': return notificationStore.isPolling
+    case 'can': return notificationStore.isCanPolling
+    case 'charge': return notificationStore.isChargePolling
+  }
+})
+const runtimeError = computed(() => {
+  switch (props.system) {
+    case 'lma': return notificationStore.lastError
+    case 'can': return notificationStore.canPollingLastError
+    case 'charge': return notificationStore.chargePollingLastError
+  }
+})
 const storageValue = computed(() => {
   if (typeof localStorage === 'undefined') return null
   return localStorage.getItem(storageKey.value)
 })
 
-const systemSources = computed(() =>
-  props.system === 'lma'
-    ? ['notifications', 'notification-poller', 'notification-data-source', 'auth', 'auth-service', 'task-actions']
-    : ['can-task-service', 'can-auth-service'],
-)
+const systemSources = computed(() => {
+  switch (props.system) {
+    case 'lma': return ['notifications', 'notification-poller', 'notification-data-source', 'auth', 'auth-service', 'task-actions']
+    case 'can': return ['can-task-service', 'can-auth-service']
+    case 'charge': return ['charge-auth-service', 'charge-task-service']
+  }
+})
 
 const systemLogs = computed(() => {
   const logs = getAppLogs()
@@ -87,12 +115,12 @@ function getLevelColor(level: AppLogLevel): string {
 const systemSession = computed(() => authStore.getSystemSession(props.system))
 const tokenPreview = computed(() => (systemSession.value?.token ? `${systemSession.value.token.slice(0, 20)}...` : '—'))
 
-function isLmaUser(user: AuthUser | CanAuthUser | null): user is AuthUser {
+function isLmaUser(user: AuthUser | CanAuthUser | ChargeAuthUser | null): user is AuthUser {
   return Boolean(user && 'stationId' in user)
 }
 
-function isCanUser(user: AuthUser | CanAuthUser | null): user is CanAuthUser {
-  return Boolean(user && 'station' in user)
+function isCanUser(user: AuthUser | CanAuthUser | ChargeAuthUser | null): user is CanAuthUser {
+  return Boolean(user && 'station' in user && (!('system' in user) || user.system !== 'charge'))
 }
 
 const accountRows = computed(() => {
@@ -110,6 +138,15 @@ const accountRows = computed(() => {
       { label: '名稱', value: user.name },
       { label: '站點', value: user.station },
       { label: '主題', value: user.topic },
+    ]
+  }
+
+  if (props.system === 'charge' && user && 'system' in user && user.system === 'charge') {
+    return [
+      { label: '帳號', value: user.account },
+      { label: '站點', value: user.station },
+      { label: '主題', value: user.topic },
+      { label: '工作階段', value: '已建立' },
     ]
   }
 
@@ -138,11 +175,25 @@ const debugInfo = computed(() => ({
 function handleIntervalChange(event: Event) {
   const target = event.target as HTMLSelectElement
   const seconds = parseInt(target.value, 10)
-  if (props.system === 'lma') {
-    notificationStore.setPollingInterval(seconds)
-    return
+  switch (props.system) {
+    case 'lma':
+      notificationStore.setPollingInterval(seconds)
+      break
+    case 'can':
+      notificationStore.setCanPollingInterval(seconds)
+      break
+    case 'charge':
+      notificationStore.setChargePollingInterval(seconds)
+      break
   }
-  notificationStore.setCanPollingInterval(seconds)
+}
+
+function getPollingDescription(system: SystemType): string {
+  switch (system) {
+    case 'lma': return '自動檢查新的警示與任務'
+    case 'can': return '自動檢查新的清潔任務'
+    case 'charge': return ''
+  }
 }
 
 async function handleLogout() {
@@ -208,7 +259,7 @@ async function copyDebugInfo() {
             <div>
               <div class="text-sm font-medium text-[var(--app-fg)]">啟用輪詢</div>
               <div class="text-xs text-[var(--app-muted)]">
-                {{ props.system === 'lma' ? '自動檢查新的警示與任務' : '自動檢查新的清潔任務' }}
+                {{ getPollingDescription(props.system) }}
               </div>
             </div>
             <label class="relative inline-flex cursor-pointer items-center">
@@ -244,6 +295,10 @@ async function copyDebugInfo() {
             <span v-else-if="pollingEnabled">已啟用；進入此系統或登入後會開始輪詢</span>
             <span v-else>已停用輪詢</span>
           </div>
+        </div>
+        <div v-if="props.system === 'charge' && !notificationStore.chargePollingEnabled" class="flex min-h-[150px] items-center gap-3 rounded-2xl bg-[var(--app-surface-2)] px-4 py-5 text-sm text-[var(--app-muted)]">
+          <span class="i-mdi-clock-outline shrink-0 text-[var(--app-primary-strong)]" />
+          <p>無線充故障目前未啟用輪詢；工作內容與輪詢狀態將在功能啟用後顯示。</p>
         </div>
       </div>
     </div>

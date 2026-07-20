@@ -23,7 +23,8 @@ const priorityStyles: Record<NotificationPriority, { borderClass: string; iconCl
 }
 
 function isLmaNotification(notification: NotificationState): boolean {
-  return notification.metadata?.system !== 'can'
+  const system = notification.metadata?.system
+  return system === undefined || system === 'lma'
 }
 
 function getPriorityStyle(priority: string) {

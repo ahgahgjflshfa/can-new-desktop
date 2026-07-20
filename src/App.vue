@@ -5,6 +5,8 @@ import NotificationsView from './components/NotificationsView.vue'
 import LoginView from './components/LoginView.vue'
 import CanLoginView from './components/CanLoginView.vue'
 import CanTaskView from './components/CanTaskView.vue'
+import ChargeLoginView from './components/ChargeLoginView.vue'
+import ChargeTaskView from './components/ChargeTaskView.vue'
 import { useSystemStore } from '@/stores/systemStore'
 import { useAuthStore } from '@/stores/authStore'
 
@@ -21,6 +23,10 @@ const authStore = useAuthStore()
     <template v-else-if="systemStore.currentView === 'can'">
       <CanLoginView v-if="!authStore.isAuthenticated" />
       <CanTaskView v-else />
+    </template>
+    <template v-else-if="systemStore.currentView === 'charge'">
+      <ChargeLoginView v-if="!authStore.isAuthenticated" />
+      <ChargeTaskView v-else />
     </template>
     <SettingsView v-else-if="systemStore.currentView === 'settings'" />
   </AppShell>

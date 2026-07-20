@@ -4,6 +4,8 @@ import { emit, listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import { logAppEvent } from '@/services/appLogger'
 import type { NotificationPriority } from '@/types/notification'
+import { isSystemType } from '@/types/system'
+import type { SystemType } from '@/types/system'
 
 interface NotificationPayload {
   id: string
@@ -116,12 +118,22 @@ const formattedTime = computed(() => {
   return date.toLocaleString()
 })
 
-const notificationSystem = computed<'lma' | 'can'>(() =>
-  currentNotification.value?.metadata?.system === 'can' ? 'can' : 'lma'
+function getNotificationSystem(metadata?: Record<string, unknown>): SystemType | null {
+  if (!metadata || !('system' in metadata)) return 'lma'
+  const system = metadata.system
+  return isSystemType(system) ? system : null
+}
+
+const notificationSystem = computed<SystemType | null>(() =>
+  getNotificationSystem(currentNotification.value?.metadata)
 )
 
 async function openMainWindow() {
   const targetSystem = notificationSystem.value
+  if (!targetSystem) {
+    logAppEvent('warn', 'popup', 'refused to route notification with unknown system')
+    return
+  }
   logAppEvent('info', 'popup', 'requested opening main window from popup', { targetSystem })
   try {
     await invoke('hide_alert_popup')
