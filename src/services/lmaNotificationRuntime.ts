@@ -172,7 +172,7 @@ let runtimeManaged = false
 let runtimeStore: RuntimeStore | null = null
 let runtimeController: LmaNotificationController | null = null
 let runtimeStop: (() => void) | null = null
-let runtimeReconcile: (() => void) | null = null
+let runtimeReconcile: (() => void | Promise<void>) | null = null
 let runtimeWatchStop: WatchStopHandle | null = null
 let canRuntimeController: CanNotificationController | null = null
 let canRuntimeReconcile: (() => void) | null = null
@@ -386,8 +386,8 @@ export function initializeNotificationRuntime(options: {
   return initializationPromise
 }
 
-export function reconcileLmaNotificationRuntime(): void {
-  runtimeReconcile?.()
+export function reconcileLmaNotificationRuntime(): Promise<void> {
+  return Promise.resolve(runtimeReconcile?.())
 }
 
 /** Synchronously fences LMA state when auth is cleared, before Vue watchers flush. */

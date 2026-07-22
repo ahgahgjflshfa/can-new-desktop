@@ -9,6 +9,7 @@ import {
   getLmaNotificationController,
   getCanNotificationController,
   getChargeNotificationController,
+  reconcileLmaNotificationRuntime,
 } from '@/services/lmaNotificationRuntime'
 import { fetchNotifications } from '@/services/notificationDataSource'
 import { useAuthStore } from '@/stores/authStore'
@@ -262,11 +263,8 @@ describe('LMA notification runtime', () => {
     vi.mocked(listen).mockResolvedValue(vi.fn())
     vi.mocked(fetchNotifications).mockResolvedValue({ notifications: [], serverTime: 'now' })
     await initializeNotificationRuntime(options)
+    await reconcileLmaNotificationRuntime()
     await vi.advanceTimersByTimeAsync(0)
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
     expect(legacyPoller.start).not.toHaveBeenCalled()
     expect(fetchNotifications).toHaveBeenCalledTimes(1)
     expect(store.lmaRuntimeActive).toBe(true)
