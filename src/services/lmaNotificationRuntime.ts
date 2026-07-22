@@ -10,8 +10,13 @@ import { ChargeNotificationController } from '@/services/chargeNotificationRunti
 import type { ChargeRuntimeContext } from '@/services/chargeNotificationRuntime'
 import type { ChargeTask } from '@/types/charge'
 
+export async function getLmaPrincipal(token: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token))
+  return `lma:${Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')}`
+}
+
 export interface LmaRuntimeCallbacks {
-  onSnapshot: (notifications: Awaited<ReturnType<typeof fetchNotifications>>['notifications']) => void
+  onSnapshot: (notifications: Awaited<ReturnType<typeof fetchNotifications>>['notifications'], principal?: string) => void
   onError: (error: Error) => void
   onStopped?: () => void
   onStarted?: () => void
@@ -21,10 +26,11 @@ export interface LmaRuntimeConfig {
   enabled: boolean
   intervalMs: number
   token: string | null
+  principal?: string | null
 }
 
 export class LmaNotificationController {
-  private config: LmaRuntimeConfig = { enabled: false, intervalMs: 10000, token: null }
+  private config: LmaRuntimeConfig = { enabled: false, intervalMs: 10000, token: null, principal: null }
   private timer: ReturnType<typeof setTimeout> | null = null
   private inFlight = false
   private queued = false
@@ -35,7 +41,7 @@ export class LmaNotificationController {
 
   reconcile(config: LmaRuntimeConfig): void {
     const unchanged = this.config.enabled === config.enabled &&
-      this.config.intervalMs === config.intervalMs && this.config.token === config.token
+      this.config.intervalMs === config.intervalMs && this.config.token === config.token && this.config.principal === config.principal
     this.config = { ...config }
     if (unchanged) return
 
@@ -67,7 +73,7 @@ export class LmaNotificationController {
     this.generation++
     this.clearTimer()
     this.queued = false
-    this.config = { enabled: false, intervalMs: this.config.intervalMs, token: null }
+    this.config = { enabled: false, intervalMs: this.config.intervalMs, token: null, principal: null }
     this.callbacks.onStopped?.()
   }
 
@@ -100,7 +106,7 @@ export class LmaNotificationController {
       const response = await fetchNotifications(undefined, this.lastSyncTime, token)
       if (requestGeneration !== this.generation || !this.isActive()) return
       this.lastSyncTime = response.serverTime
-      this.callbacks.onSnapshot(response.notifications)
+      this.callbacks.onSnapshot(response.notifications, this.config.principal ?? undefined)
     } catch (error) {
       if (requestGeneration === this.generation && this.isActive()) {
         const normalized = error instanceof Error ? error : new Error(String(error))
@@ -132,12 +138,14 @@ export class LmaNotificationController {
 }
 
 interface RuntimeStore {
-  loadFromStorage: () => void
-  handleNewNotifications: (notifications: Awaited<ReturnType<typeof fetchNotifications>>['notifications'], system?: Exclude<SystemType, 'charge'>) => void
+  loadFromStorage: (principal?: string) => void
+  handleNewNotifications: (notifications: Awaited<ReturnType<typeof fetchNotifications>>['notifications'], system?: Exclude<SystemType, 'charge'>, principal?: string) => void
+  setLmaPrincipal?: (principal: string | null) => void
+  clearLmaState?: () => void
   setLmaRuntimeState?: (active: boolean) => void
   setPollingError?: (error: string | null) => void
   handleDismissEvent?: (payload: { notificationId: string | null; dismissAll: boolean }) => void
-  handlePopupClosedEvent?: (notificationId: string | null) => void
+  handlePopupClosedEvent?: (notificationId: string | null, revision: number) => void
   runReminderCycle?: () => Promise<void>
   pollingEnabled: boolean
   pollingIntervalMs: number
@@ -161,6 +169,7 @@ interface RuntimeStore {
 let initializationPromise: Promise<void> | null = null
 let runtimeEpoch = 0
 let runtimeManaged = false
+let runtimeStore: RuntimeStore | null = null
 let runtimeController: LmaNotificationController | null = null
 let runtimeStop: (() => void) | null = null
 let runtimeReconcile: (() => void) | null = null
@@ -216,6 +225,7 @@ export function teardownNotificationRuntime(): void {
   for (const unlisten of runtimeUnlisteners.splice(0)) unlisten()
   initializationPromise = null
   runtimeManaged = false
+  runtimeStore = null
 }
 
 export function initializeNotificationRuntime(options: {
@@ -229,10 +239,13 @@ export function initializeNotificationRuntime(options: {
   initializationPromise = (async () => {
     const epoch = runtimeEpoch
     const { notificationStore, authStore } = options
+    runtimeStore = notificationStore
+    // Hydration without a principal deliberately drops persisted LMA entries;
+    // the authenticated snapshot repopulates only the current account.
     notificationStore.loadFromStorage()
     if (epoch !== runtimeEpoch) return
     runtimeController = new LmaNotificationController({
-      onSnapshot: notifications => notificationStore.handleNewNotifications(notifications, 'lma'),
+      onSnapshot: (notifications, principal) => notificationStore.handleNewNotifications(notifications, 'lma', principal),
       onError: error => notificationStore.setPollingError?.(error.message),
       onStopped: () => notificationStore.setLmaRuntimeState?.(false),
       onStarted: () => notificationStore.setLmaRuntimeState?.(true),
@@ -268,8 +281,8 @@ export function initializeNotificationRuntime(options: {
       })
       if (epoch !== runtimeEpoch) { dismissUnlisten(); return }
       runtimeUnlisteners.push(dismissUnlisten)
-      const popupClosedUnlisten = await listen<{ notificationId: string | null }>('popup-closed', event => {
-        notificationStore.handlePopupClosedEvent?.(event.payload.notificationId)
+      const popupClosedUnlisten = await listen<{ notificationId: string | null; revision: number }>('popup-closed', event => {
+        notificationStore.handlePopupClosedEvent?.(event.payload.notificationId, event.payload.revision)
       })
       if (epoch !== runtimeEpoch) { popupClosedUnlisten(); return }
       runtimeUnlisteners.push(popupClosedUnlisten)
@@ -305,11 +318,22 @@ export function initializeNotificationRuntime(options: {
       throw error
     }
 
-    const reconcile = () => runtimeController?.reconcile({
-      enabled: notificationStore.pollingEnabled,
-      intervalMs: notificationStore.pollingIntervalMs,
-      token: authStore.getSystemSession('lma')?.token ?? null,
-    })
+    let previousLmaPrincipal: string | null = null
+    const reconcile = async () => {
+      const token = authStore.getSystemSession('lma')?.token ?? null
+      const principal = token ? await getLmaPrincipal(token) : null
+      if (token !== (authStore.getSystemSession('lma')?.token ?? null)) return
+      if (previousLmaPrincipal !== principal) {
+        notificationStore.setLmaPrincipal?.(principal)
+        previousLmaPrincipal = principal
+      }
+      runtimeController?.reconcile({
+        enabled: notificationStore.pollingEnabled,
+        intervalMs: notificationStore.pollingIntervalMs,
+        token,
+        principal,
+      })
+    }
     runtimeReconcile = reconcile
     runtimeWatchStop = watch(
       () => [authStore.getSystemSession('lma')?.token ?? null, notificationStore.pollingEnabled, notificationStore.pollingIntervalMs],
@@ -364,6 +388,13 @@ export function initializeNotificationRuntime(options: {
 
 export function reconcileLmaNotificationRuntime(): void {
   runtimeReconcile?.()
+}
+
+/** Synchronously fences LMA state when auth is cleared, before Vue watchers flush. */
+export function invalidateLmaNotificationPrincipal(): void {
+  runtimeStore?.setLmaPrincipal?.(null)
+  runtimeStore?.clearLmaState?.()
+  runtimeController?.teardown()
 }
 
 export function reconcileCanNotificationRuntime(): void { canRuntimeReconcile?.() }

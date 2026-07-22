@@ -29,7 +29,8 @@ pub use charge_commands::{charge_complete_task, charge_fetch_tasks, charge_login
 pub use device_id::get_or_create_device_id;
 pub use log_commands::export_app_logs;
 pub use popup_commands::{
-    emit_dismiss_notification, get_pending_notification, hide_alert_popup, show_alert_popup,
+    ack_popup_displayed, clear_alert_popup_system, emit_dismiss_notification,
+    get_pending_notification, hide_alert_popup, show_alert_popup,
 };
 pub use task_commands::{complete_task, fetch_tasks, reply_task};
 pub use window_controls::{set_minimize_to_tray_on_close, show_emergency_window};
@@ -45,13 +46,35 @@ pub fn run() {
                     api.prevent_close();
 
                     let state = window.state::<PendingNotificationState>();
-                    let notification_id = state.notification.lock().ok().and_then(|mut pending| {
-                        let id = pending.as_ref().map(|n| n.id.clone());
-                        *pending = None;
-                        id
-                    });
+                    let displayed = state
+                        .displayed
+                        .lock()
+                        .ok()
+                        .and_then(|mut displayed| displayed.take());
+                    let mut notification_id = String::new();
+                    let mut revision = 0;
+                    if let Some((id, rev)) = displayed {
+                        if let Ok(mut pending) = state.notification.lock() {
+                            if pending
+                                .as_ref()
+                                .map(|n| n.id == id && n.revision == rev)
+                                .unwrap_or(false)
+                            {
+                                *pending = None;
+                                notification_id = id;
+                                revision = rev;
+                            }
+                        }
+                    }
 
-                    let payload = PopupClosedPayload { notification_id };
+                    let payload = PopupClosedPayload {
+                        notification_id: if notification_id.is_empty() {
+                            None
+                        } else {
+                            Some(notification_id)
+                        },
+                        revision,
+                    };
                     if let Some(main_window) = window.app_handle().get_webview_window("main") {
                         let _ = main_window.emit("popup-closed", payload);
                     }
@@ -105,6 +128,8 @@ pub fn run() {
             show_emergency_window,
             show_alert_popup,
             hide_alert_popup,
+            clear_alert_popup_system,
+            ack_popup_displayed,
             emit_dismiss_notification,
             get_pending_notification,
             export_app_logs

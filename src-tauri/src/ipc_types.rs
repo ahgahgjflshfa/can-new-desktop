@@ -14,6 +14,8 @@ pub struct NotificationPayload {
     #[serde(rename = "unreadCount")]
     pub unread_count: u32,
     pub metadata: Option<HashMap<String, serde_json::Value>>,
+    #[serde(default)]
+    pub revision: u64,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -28,4 +30,11 @@ pub struct DismissPayload {
 pub struct PopupClosedPayload {
     #[serde(rename = "notificationId")]
     pub notification_id: Option<String>,
+    pub revision: u64,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct PopupClearedPayload {
+    pub system: String,
+    pub revision: u64,
 }

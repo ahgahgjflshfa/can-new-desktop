@@ -179,6 +179,39 @@ describe('notificationStore', () => {
   })
 
   describe('handleNewNotifications', () => {
+    test('isolates LMA hydration and credential changes without clearing other systems', () => {
+      const store = useNotificationStore()
+      store.setLmaPrincipal('account-a')
+      store.handleNewNotifications([createMockNotification({ id: 'a', metadata: { system: 'lma' } })], 'lma', 'account-a')
+      store.handleCanTasks([{ serialNumber: 1, station: 'A1', trashBin: 'bin', isDone: false, cleanAt: null, informTime: 0, resolutionType: 0, visitorID: null, isDisable: false, createdAt: 'now', updatedAt: 'now' } as CanTask])
+
+      store.setLmaPrincipal('account-b')
+
+      expect(store.notifications.map(n => n.id)).toEqual(['can:1'])
+      expect(store.currentNotification?.metadata?.system).toBe('can')
+    })
+
+    test('hydrates only persisted LMA notifications for the active principal', () => {
+      localStorage.setItem('tauri-app:notifications', JSON.stringify([
+        { ...createMockNotification({ id: 'a', metadata: { system: 'lma', principal: 'account-a' } }), status: 'pending' },
+        { ...createMockNotification({ id: 'b', metadata: { system: 'lma', principal: 'account-b' } }), status: 'pending' },
+        { ...createMockNotification({ id: 'can', metadata: { system: 'can' } }), status: 'pending' },
+      ]))
+      const store = useNotificationStore()
+      store.loadFromStorage('account-b')
+
+      expect(store.notifications.map(n => n.id)).toEqual(['b', 'can'])
+    })
+
+    test('rejects stale LMA snapshots after principal changes', () => {
+      const store = useNotificationStore()
+      store.setLmaPrincipal('account-a')
+      store.setLmaPrincipal('account-b')
+      store.handleNewNotifications([createMockNotification({ id: 'stale-a', metadata: { system: 'lma' } })], 'lma', 'account-a')
+
+      expect(store.notifications).toHaveLength(0)
+    })
+
     test('real charge completion fences a deferred poll and performs one authoritative refresh', async () => {
       const store = useNotificationStore()
       const authStore = useAuthStore()
@@ -471,7 +504,7 @@ describe('notificationStore', () => {
         .filter(([command]) => command === 'show_alert_popup')
         .map(([, payload]) => (payload as { notification?: { id?: string } }).notification?.id)
 
-      authStore.lmaSession = null
+      authStore.clearSession('lma')
       runtimeAuthStore.getSystemSession.mockReturnValue(null)
       store.setPollingEnabled(false)
       store.dismissNotificationById(second.id)
@@ -601,6 +634,29 @@ describe('notificationStore', () => {
       expect(store.currentNotification).toBeNull()
       expect(store.isPopupVisible).toBe(false)
       expect(store.notifications.find(notification => notification.id === 'popup-error')?.status).toBe('pending')
+    })
+
+    test('clears a deferred LMA popup after logout without adopting its stale identity', async () => {
+      vi.mocked(isTauriRuntime).mockReturnValue(true)
+      vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+      let resolveShow!: (value: { revision: number }) => void
+      vi.mocked(invoke).mockImplementation((command: string) => command === 'show_alert_popup'
+        ? new Promise(resolve => { resolveShow = resolve })
+        : Promise.resolve())
+      const store = useNotificationStore()
+      store.setLmaPrincipal('principal-a')
+      const notification = createMockNotification({ id: 'deferred-a', metadata: { system: 'lma', principal: 'principal-a' } })
+      store.handleNewNotifications([notification])
+      await Promise.resolve()
+      store.setLmaPrincipal(null)
+      resolveShow({ revision: 41 })
+      await Promise.resolve()
+      await Promise.resolve()
+
+      expect(store.lmaPopupIdentity).toBeNull()
+      expect(invoke).toHaveBeenCalledWith('clear_alert_popup_system', {
+        system: 'lma', expectedPrincipal: 'principal-a', expectedRevision: 41,
+      })
     })
 
     test('queues subsequent notifications', () => {

@@ -4,6 +4,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import {
   initializeNotificationRuntime,
   LmaNotificationController,
+  getLmaPrincipal,
   teardownNotificationRuntime,
   getLmaNotificationController,
   getCanNotificationController,
@@ -57,8 +58,37 @@ describe('LMA notification runtime', () => {
     resolveFirst({ notifications: [], serverTime: 'first' })
     await Promise.resolve()
     await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
     expect(fetchNotifications).toHaveBeenCalledTimes(2)
     expect(snapshots).toHaveLength(2)
+  })
+
+  test('passes the raw bearer token and accepts its snapshot under a separate principal', async () => {
+    vi.mocked(fetchNotifications).mockResolvedValue({
+      notifications: [], serverTime: 'accepted',
+    })
+    const onSnapshot = vi.fn()
+    const controller = new LmaNotificationController({ onSnapshot, onError: vi.fn() })
+    const token = 'Bearer exact-token-value'
+    controller.reconcile({ enabled: true, intervalMs: 1000, token, principal: 'accepted-principal' })
+    await vi.advanceTimersByTimeAsync(0)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(fetchNotifications).toHaveBeenCalledWith(undefined, undefined, token)
+    expect(onSnapshot).toHaveBeenCalledWith([], 'accepted-principal')
+    expect(onSnapshot.mock.calls[0]?.[1]).not.toBe(token)
+  })
+
+  test('principal is a stable irreversible SHA-256 identity', async () => {
+    const first = await getLmaPrincipal('token-a')
+    expect(first).toBe('lma:a70bf50e531ce1a817561f2f5d5b6645d4e806becf58ccc5e8cf6b8045a090a8')
+    expect(first).not.toContain('token-a')
+    expect(first).not.toBe(`lma:${btoa('token-a')}`)
+    expect(await getLmaPrincipal('token-a')).toBe(first)
+    expect(await getLmaPrincipal('token-b')).not.toBe(first)
   })
 
   test('discards an in-flight result after generation changes', async () => {
@@ -149,6 +179,8 @@ describe('LMA notification runtime', () => {
     vi.mocked(listen).mockResolvedValue(unlisten)
     await initializeNotificationRuntime(options)
     await initializeNotificationRuntime(options)
+    await Promise.resolve()
+    await Promise.resolve()
     expect(notificationStore.loadFromStorage).toHaveBeenCalledTimes(2)
     expect(listen).toHaveBeenCalledTimes(5)
   })
@@ -231,6 +263,10 @@ describe('LMA notification runtime', () => {
     vi.mocked(fetchNotifications).mockResolvedValue({ notifications: [], serverTime: 'now' })
     await initializeNotificationRuntime(options)
     await vi.advanceTimersByTimeAsync(0)
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
     expect(legacyPoller.start).not.toHaveBeenCalled()
     expect(fetchNotifications).toHaveBeenCalledTimes(1)
     expect(store.lmaRuntimeActive).toBe(true)

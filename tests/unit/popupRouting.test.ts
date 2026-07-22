@@ -5,11 +5,12 @@ import PopupApp from '@/PopupApp.vue'
 const eventState = vi.hoisted(() => ({ listener: null as ((event: { payload: unknown }) => void) | null }))
 const emitMock = vi.hoisted(() => vi.fn())
 const invokeMock = vi.hoisted(() => vi.fn())
+const revisionState = vi.hoisted(() => ({ next: 0 }))
 
 vi.mock('@tauri-apps/api/event', () => ({
   emit: emitMock,
-  listen: vi.fn(async (_name: string, callback: (event: { payload: unknown }) => void) => {
-    eventState.listener = callback
+  listen: vi.fn(async (name: string, callback: (event: { payload: unknown }) => void) => {
+    if (name === 'show-notification') eventState.listener = callback
     return vi.fn()
   }),
 }))
@@ -20,6 +21,7 @@ describe('Popup source routing', () => {
     eventState.listener = null
     emitMock.mockReset()
     invokeMock.mockReset().mockResolvedValue(null)
+    revisionState.next = 0
   })
   afterEach(() => eventState.listener = null)
 
@@ -28,6 +30,7 @@ describe('Popup source routing', () => {
     await Promise.resolve()
     eventState.listener?.({ payload: {
       id: 'n1', title: 'title', body: 'body', priority: 'pending', createdAt: '2026-01-01', unreadCount: 1, metadata,
+      revision: ++revisionState.next,
     } })
     await wrapper.vm.$nextTick()
     await wrapper.get('button').trigger('click')

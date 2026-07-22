@@ -8,6 +8,7 @@ import type { AuthUser } from '@/types/auth'
 import type { CanAuthUser } from '@/types/can'
 import type { ChargeAuthUser } from '@/types/charge'
 import type { SystemType } from '@/types/system'
+import { invalidateLmaNotificationPrincipal } from '@/services/lmaNotificationRuntime'
 
 const AUTH_STORAGE_KEY = 'tauri-app:auth'
 const LMA_AUTH_STORAGE_KEY = 'tauri-app:auth:lma'
@@ -98,6 +99,9 @@ export const useAuthStore = defineStore('auth', {
       try {
         if (system === 'lma') {
           const result = await loginWithPassword(account, password)
+          // A successful login may replace an existing LMA principal without a
+          // separate logout; fence that principal before exposing the new one.
+          invalidateLmaNotificationPrincipal()
           this.lmaSession = { token: result.token, user: result.user }
           this.currentSystem = 'lma'
           this.selectSystem('lma')
@@ -178,6 +182,7 @@ export const useAuthStore = defineStore('auth', {
 
     clearSession(system?: SystemType) {
       const targetSystem = system ?? this.currentSystem
+      if (targetSystem === 'lma') invalidateLmaNotificationPrincipal()
       if (targetSystem === 'lma') this.lmaSession = null
       else if (targetSystem === 'can') this.canSession = null
       else this.chargeSession = null

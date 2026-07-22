@@ -13,7 +13,7 @@ import type { ChargeRuntimeContext } from '@/services/chargeNotificationRuntime'
 import { useAuthStore } from '@/stores/authStore'
 import { completeCanTask } from '@/services/canTaskService'
 import { completeChargeTask, isChargeForbidden } from '@/services/chargeTaskService'
-import { getCanNotificationController, getChargeNotificationController, getLmaNotificationController, isLmaNotificationRuntimeManaged, reconcileCanNotificationRuntime, reconcileLmaNotificationRuntime, triggerCanNotificationRuntime, triggerChargeNotificationRuntime } from '@/services/lmaNotificationRuntime'
+import { getCanNotificationController, getChargeNotificationController, getLmaNotificationController, getLmaPrincipal, isLmaNotificationRuntimeManaged, reconcileCanNotificationRuntime, reconcileLmaNotificationRuntime, triggerCanNotificationRuntime, triggerChargeNotificationRuntime } from '@/services/lmaNotificationRuntime'
 import type { SystemType } from '@/types/system'
 
 const NOTIFICATION_STORAGE_KEY = 'tauri-app:notifications'
@@ -94,8 +94,9 @@ function getStoredNotificationId(notification: EmergencyNotification, system: No
   return notification.id
 }
 
-function normalizeIncomingNotification(notification: EmergencyNotification, system: NotificationSystem): EmergencyNotification {
+function normalizeIncomingNotification(notification: EmergencyNotification, system: NotificationSystem, principal?: string): EmergencyNotification {
   const metadata: Record<string, unknown> = { ...notification.metadata, system }
+  if (system === 'lma' && principal) metadata.principal = principal
   if (system === 'lma' && metadata.taskId === undefined) {
     const taskId = Number(notification.id)
     if (Number.isFinite(taskId)) {
@@ -119,10 +120,10 @@ let popupNativeOperation: Promise<void> = Promise.resolve()
 let reminderCyclePromise: Promise<void> | null = null
 let reminderCycleDirty = false
 
-function serializePopupOperation(operation: () => Promise<void>): Promise<void> {
+function serializePopupOperation<T>(operation: () => Promise<T>): Promise<T> {
   if (!getLmaNotificationController()) return operation()
   const next = popupNativeOperation.catch(() => undefined).then(operation)
-  popupNativeOperation = next
+  popupNativeOperation = next.then(() => undefined)
   return next
 }
 
@@ -167,6 +168,7 @@ interface DismissPayload {
 
 interface PopupClosedPayload {
   notificationId: string | null
+  revision: number
 }
 
 function normalizePriority(value: unknown): NotificationPriority {
@@ -231,6 +233,7 @@ function clampPollingIntervalSeconds(seconds: number): number {
 export const useNotificationStore = defineStore('notifications', {
   state: () => ({
     notifications: [] as NotificationState[],
+    lmaPrincipal: null as string | null,
     currentNotification: null as NotificationState | null,
     isPolling: false,
     lmaRuntimeActive: true,
@@ -264,6 +267,8 @@ export const useNotificationStore = defineStore('notifications', {
     } as PollingStats,
     isTaskActionPending: false,
     taskActionError: null as string | null,
+    lmaActionEpoch: 0,
+    lmaPopupIdentity: null as { principal: string; revision: number } | null,
     inAppReminderVisible: false,
     inAppReminderCount: 0,
     isPopupVisible: false,
@@ -603,7 +608,8 @@ export const useNotificationStore = defineStore('notifications', {
       }
     },
 
-    handlePopupClosedEvent(notificationId: string | null) {
+    handlePopupClosedEvent(notificationId: string | null, revision = 0) {
+      if (revision > 0 && this.lmaPopupIdentity && revision !== this.lmaPopupIdentity.revision) return
       if (notificationId) {
         const notification = this.notifications.find(n => n.id === notificationId)
         if (notification && notification.status !== 'dismissed') {
@@ -613,6 +619,7 @@ export const useNotificationStore = defineStore('notifications', {
         if (this.currentNotification?.id === notificationId) this.currentNotification = null
       }
       this.isPopupVisible = false
+      if (this.lmaPopupIdentity?.revision === revision) this.lmaPopupIdentity = null
       void this.runReminderCycle()
     },
 
@@ -715,12 +722,13 @@ export const useNotificationStore = defineStore('notifications', {
       await poller.triggerPoll()
     },
 
-    handleNewNotifications(newNotifications: EmergencyNotification[], system: NotificationSystem = 'lma') {
+    handleNewNotifications(newNotifications: EmergencyNotification[], system: NotificationSystem = 'lma', principal?: string) {
       if (newNotifications.length > 0) {
         logAppEvent('info', 'notifications', 'received notifications from poller', { count: newNotifications.length })
       }
 
-      const normalizedNotifications = newNotifications.map(notification => normalizeIncomingNotification(notification, system))
+      if (system === 'lma' && principal && this.lmaPrincipal !== principal) return
+      const normalizedNotifications = newNotifications.map(notification => normalizeIncomingNotification(notification, system, principal))
 
       for (const notification of normalizedNotifications) {
         const existingIndex = this.notifications.findIndex(n => n.id === notification.id)
@@ -809,6 +817,35 @@ export const useNotificationStore = defineStore('notifications', {
         this.currentNotification = null
         this.isPopupVisible = false
       }
+      void this.runReminderCycle()
+      this.saveToStorage()
+    },
+
+    setLmaPrincipal(principal: string | null) {
+      if (this.lmaPrincipal === principal) return
+      const previousPrincipal = this.lmaPrincipal
+      this.lmaPrincipal = principal
+      this.clearLmaState(previousPrincipal)
+    },
+
+    clearLmaState(expectedPrincipalOverride?: string | null) {
+      this.lmaActionEpoch++
+      this.isTaskActionPending = false
+      this.taskActionError = null
+      this.notifications = this.notifications.filter(notification => getNotificationSystem(notification) !== 'lma')
+      if (this.currentNotification && getNotificationSystem(this.currentNotification) === 'lma') {
+        this.currentNotification = null
+        this.isPopupVisible = false
+      }
+      this.clearReminderSignals()
+      const expectedPrincipal = expectedPrincipalOverride ?? this.lmaPrincipal ?? ''
+      const expectedRevision = this.lmaPopupIdentity?.revision ?? 0
+      this.lmaPopupIdentity = null
+      if (isTauriRuntime() && expectedPrincipal && expectedRevision) void invoke('clear_alert_popup_system', {
+        system: 'lma', expectedPrincipal, expectedRevision,
+      }).catch(error => {
+        logAppEvent('warn', 'notifications', 'failed to clear LMA popup state', error)
+      })
       void this.runReminderCycle()
       this.saveToStorage()
     },
@@ -942,7 +979,9 @@ export const useNotificationStore = defineStore('notifications', {
           notificationId: notification.id,
           priority: notification.priority,
         })
-        await serializePopupOperation(() => invoke('show_alert_popup', {
+        const capturedPrincipal = typeof notification.metadata?.principal === 'string' ? notification.metadata.principal : ''
+        const capturedEpoch = this.lmaActionEpoch
+        const shown = await serializePopupOperation(() => invoke<{ revision: number }>('show_alert_popup', {
           notification: {
             id: notification.id,
             title: notification.title,
@@ -954,6 +993,13 @@ export const useNotificationStore = defineStore('notifications', {
             metadata: notification.metadata,
           },
         }))
+        if (shown && capturedPrincipal && capturedEpoch === this.lmaActionEpoch && this.lmaPrincipal === capturedPrincipal && this.currentNotification === notification) {
+          this.lmaPopupIdentity = { principal: capturedPrincipal, revision: shown.revision }
+        } else if (shown && capturedPrincipal && capturedEpoch !== this.lmaActionEpoch && isTauriRuntime()) {
+          void invoke('clear_alert_popup_system', {
+            system: 'lma', expectedPrincipal: capturedPrincipal, expectedRevision: shown.revision,
+          }).catch(error => logAppEvent('warn', 'notifications', 'failed to clear stale deferred popup', error))
+        }
       } catch (err) {
         notification.status = 'pending'
         if (this.currentNotification?.id === notification.id) {
@@ -998,11 +1044,15 @@ export const useNotificationStore = defineStore('notifications', {
         return metadataTaskId
       }
 
-      const taskId = Number(notificationId)
-      return Number.isFinite(taskId) ? taskId : null
+      return null
     },
 
     async replyTaskById(notificationId: string) {
+      const notification = this.notifications.find(item => item.id === notificationId)
+      if (!notification || getNotificationSystem(notification) !== 'lma') {
+        this.taskActionError = '任務編號無效'
+        return
+      }
       const taskId = this.getTaskId(notificationId)
       if (taskId === null) {
         this.taskActionError = '任務編號無效'
@@ -1011,11 +1061,17 @@ export const useNotificationStore = defineStore('notifications', {
 
       this.isTaskActionPending = true
       this.taskActionError = null
+      let epoch = this.lmaActionEpoch
 
       try {
         const token = useAuthStore().getSystemSession('lma')?.token
         if (!token) throw new Error('缺少立碼幫幫忙登入驗證資訊，請重新登入')
+        const principal = await getLmaPrincipal(token)
+        epoch = this.lmaActionEpoch
+        if (this.lmaPrincipal !== null && this.lmaPrincipal !== principal) throw new Error('登入驗證資訊已變更，請重新登入')
+        if (this.notifications.find(item => item.id === notificationId) !== notification) throw new Error('通知已不存在')
         const status = await replyTask(token, taskId)
+        if (epoch !== this.lmaActionEpoch || useAuthStore().getSystemSession('lma')?.token !== token || (this.lmaPrincipal !== null && this.lmaPrincipal !== principal)) return
         if (status === 'replied' || status === 'completed' || status === 'ignored' || status === 'pending') {
           this.setTaskStatus(notificationId, status)
         } else {
@@ -1024,14 +1080,19 @@ export const useNotificationStore = defineStore('notifications', {
         this.saveToStorage()
         logAppEvent('info', 'notifications', 'task reply succeeded', { notificationId, status })
       } catch (err) {
-        this.taskActionError = err instanceof Error ? err.message : String(err)
+        if (this.lmaActionEpoch === epoch) this.taskActionError = err instanceof Error ? err.message : String(err)
         logAppEvent('error', 'notifications', 'task reply failed', err)
       } finally {
-        this.isTaskActionPending = false
+        if (this.lmaActionEpoch === epoch) this.isTaskActionPending = false
       }
     },
 
     async completeTaskById(notificationId: string, result: CompletionResult) {
+      const notification = this.notifications.find(item => item.id === notificationId)
+      if (!notification || getNotificationSystem(notification) !== 'lma') {
+        this.taskActionError = '任務編號無效'
+        return
+      }
       const taskId = this.getTaskId(notificationId)
       if (taskId === null) {
         this.taskActionError = '任務編號無效'
@@ -1040,19 +1101,25 @@ export const useNotificationStore = defineStore('notifications', {
 
       this.isTaskActionPending = true
       this.taskActionError = null
+      let epoch = this.lmaActionEpoch
 
       try {
         const token = useAuthStore().getSystemSession('lma')?.token
         if (!token) throw new Error('缺少立碼幫幫忙登入驗證資訊，請重新登入')
+        const principal = await getLmaPrincipal(token)
+        epoch = this.lmaActionEpoch
+        if (this.lmaPrincipal !== null && this.lmaPrincipal !== principal) throw new Error('登入驗證資訊已變更，請重新登入')
+        if (this.notifications.find(item => item.id === notificationId) !== notification) throw new Error('通知已不存在')
         await completeTask(token, taskId, result)
+        if (epoch !== this.lmaActionEpoch || useAuthStore().getSystemSession('lma')?.token !== token || (this.lmaPrincipal !== null && this.lmaPrincipal !== principal)) return
         this.setTaskStatus(notificationId, 'completed')
         this.dismissNotificationById(notificationId)
         logAppEvent('info', 'notifications', 'task completion succeeded', { notificationId, result })
       } catch (err) {
-        this.taskActionError = err instanceof Error ? err.message : String(err)
+        if (this.lmaActionEpoch === epoch) this.taskActionError = err instanceof Error ? err.message : String(err)
         logAppEvent('error', 'notifications', 'task completion failed', err)
       } finally {
-        this.isTaskActionPending = false
+        if (this.lmaActionEpoch === epoch) this.isTaskActionPending = false
       }
     },
 
@@ -1227,8 +1294,9 @@ export const useNotificationStore = defineStore('notifications', {
       this.pollingStats.isConnected = error === null
     },
 
-    loadFromStorage() {
+    loadFromStorage(principal?: string) {
       if (typeof localStorage === 'undefined') return
+      if (principal) this.lmaPrincipal = principal
 
       const raw = localStorage.getItem(NOTIFICATION_STORAGE_KEY)
       if (raw) {
@@ -1237,7 +1305,9 @@ export const useNotificationStore = defineStore('notifications', {
           if (Array.isArray(parsed)) {
             this.notifications = parsed
               .map(normalizeStoredNotification)
-              .filter((item): item is NotificationState => item !== null)
+              .filter((item): item is NotificationState => item !== null &&
+                (getNotificationSystem(item) !== 'lma' || (principal !== undefined && item.metadata?.principal === principal)))
+            this.saveToStorage()
           }
         } catch (err) {
           logAppEvent('warn', 'notifications', 'failed to parse stored notifications', err)

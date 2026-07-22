@@ -13,6 +13,14 @@ const SHOW_MENU_ID: &str = "show";
 const QUIT_MENU_ID: &str = "quit";
 const LOG_SOURCE: &str = "window-controls";
 
+fn missing_main_window_error(has_window: bool) -> Result<(), String> {
+    if has_window {
+        Ok(())
+    } else {
+        Err("main window is not available".to_string())
+    }
+}
+
 fn main_window<R: Runtime>(app: &AppHandle<R>) -> Option<tauri::WebviewWindow<R>> {
     app.get_webview_window(MAIN_WINDOW_LABEL)
 }
@@ -96,20 +104,35 @@ pub fn set_minimize_to_tray_on_close(
 
 #[tauri::command]
 pub async fn show_emergency_window(app: tauri::AppHandle) -> Result<(), String> {
-    if let Some(window) = main_window(&app) {
+    let window = match main_window(&app) {
+        Some(window) => window,
+        None => {
+            runtime_log::warn(
+                LOG_SOURCE,
+                "show_emergency_window called but main window was not available",
+            );
+            missing_main_window_error(false)?;
+            unreachable!();
+        }
+    };
+    {
         runtime_log::info(LOG_SOURCE, "Showing emergency window");
         let _ = window.unminimize();
         window.show().map_err(|e| e.to_string())?;
         window.set_always_on_top(false).map_err(|e| e.to_string())?;
         window.set_focus().map_err(|e| e.to_string())?;
-    } else {
-        runtime_log::warn(
-            LOG_SOURCE,
-            "show_emergency_window called but main window was not available",
-        );
     }
     crate::popup_commands::hide_alert_popup(app)
         .await
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn missing_main_window_is_an_error_before_popup_hide() {
+        assert!(super::missing_main_window_error(false).is_err());
+        assert!(super::missing_main_window_error(true).is_ok());
+    }
 }

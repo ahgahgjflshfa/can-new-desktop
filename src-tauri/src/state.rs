@@ -10,4 +10,6 @@ pub struct MinimizeToTrayState {
 #[derive(Default)]
 pub struct PendingNotificationState {
     pub notification: Mutex<Option<NotificationPayload>>,
+    pub revision: Mutex<u64>,
+    pub displayed: Mutex<Option<(String, u64)>>,
 }

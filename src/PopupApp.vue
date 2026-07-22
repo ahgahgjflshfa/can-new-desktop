@@ -6,6 +6,7 @@ import { logAppEvent } from '@/services/appLogger'
 import type { NotificationPriority } from '@/types/notification'
 import { isSystemType } from '@/types/system'
 import type { SystemType } from '@/types/system'
+import { PopupRevisionGate, shouldClearLmaPopup } from '@/services/popupRevision'
 
 interface NotificationPayload {
   id: string
@@ -16,10 +17,29 @@ interface NotificationPayload {
   createdAt: string
   unreadCount: number
   metadata?: Record<string, unknown>
+  revision: number
 }
 
+interface PopupClearedPayload { system: SystemType; revision: number }
+
 const currentNotification = ref<NotificationPayload | null>(null)
+const revisionGate = new PopupRevisionGate<NotificationPayload>()
 let unlistenShow: UnlistenFn | null = null
+let unlistenCleared: UnlistenFn | null = null
+let lastSoundRevision = 0
+
+function acceptNotification(notification: NotificationPayload): void {
+  const revision = Number.isFinite(notification.revision) ? notification.revision : 0
+  const result = revisionGate.accept({ ...notification, revision })
+  if (!result.accepted) return
+  currentNotification.value = revisionGate.currentPayload
+  if (result.playSound) {
+    lastSoundRevision = revision
+    playNotificationSound()
+  }
+  void invoke('ack_popup_displayed', { notificationId: notification.id, revision }).catch(err =>
+    logAppEvent('warn', 'popup', 'failed to acknowledge displayed notification', err))
+}
 
 function playNotificationSound() {
   if (typeof window === 'undefined') return
@@ -136,20 +156,31 @@ async function openMainWindow() {
   }
   logAppEvent('info', 'popup', 'requested opening main window from popup', { targetSystem })
   try {
+    await invoke('show_emergency_window')
+    await emit('open-notification-system', { system: targetSystem })
     await invoke('hide_alert_popup')
   } catch (err) {
-    logAppEvent('warn', 'popup', 'failed to hide popup before opening main window', err)
+    logAppEvent('warn', 'popup', 'failed to open main window from popup', err)
   }
-  await invoke('show_emergency_window')
-  await emit('open-notification-system', { system: targetSystem })
 }
 
 onMounted(async () => {
   unlistenShow = await listen<NotificationPayload>('show-notification', event => {
     console.log('[Popup] Received show-notification event:', event.payload)
     logAppEvent('info', 'popup', 'received show-notification event', event.payload)
-    currentNotification.value = event.payload
-    playNotificationSound()
+    acceptNotification(event.payload)
+  })
+
+  unlistenCleared = await listen<PopupClearedPayload>('popup-cleared', event => {
+    revisionGate.clear(event.payload.revision)
+    if (currentNotification.value !== null && shouldClearLmaPopup(
+      event.payload.system,
+      typeof currentNotification.value.metadata?.system === 'string' ? currentNotification.value.metadata.system : null,
+      currentNotification.value.revision,
+      event.payload.revision,
+    )) {
+      currentNotification.value = null
+    }
   })
 
   try {
@@ -158,8 +189,7 @@ onMounted(async () => {
     console.log('[Popup] get_pending_notification returned:', pending)
     if (pending) {
       logAppEvent('info', 'popup', 'loaded pending notification on mount', { notificationId: pending.id })
-      currentNotification.value = pending
-      playNotificationSound()
+      acceptNotification(pending)
     }
   } catch (err) {
     logAppEvent('warn', 'popup', 'failed to get pending notification', err)
@@ -169,6 +199,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   unlistenShow?.()
+  unlistenCleared?.()
 })
 </script>
 
