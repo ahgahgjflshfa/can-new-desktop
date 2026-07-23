@@ -12,6 +12,7 @@ mod constants;
 mod device_id;
 mod ipc_types;
 mod log_commands;
+mod notification_sound;
 mod popup_commands;
 mod runtime_log;
 mod state;

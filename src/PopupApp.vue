@@ -80,7 +80,17 @@ function acceptSnapshot(value: unknown): void {
     logAppEvent('warn', 'popup', 'failed to acknowledge displayed snapshot', err))
 }
 
+/** Windows uses native PlaySound from Rust; skip Web Audio to avoid double sound / autoplay issues. */
+function isWindowsHost(): boolean {
+  if (typeof navigator === 'undefined') return false
+  const platform = navigator.platform ?? ''
+  const ua = navigator.userAgent ?? ''
+  return /Win/i.test(platform) || /Windows/i.test(ua)
+}
+
 function playNotificationSound() {
+  // Gate-1: never run Web Audio on Windows — Rust plays notification.wav via PlaySoundW.
+  if (isWindowsHost()) return
   if (typeof window === 'undefined' || !window.AudioContext) return
   try {
     const context = new window.AudioContext()

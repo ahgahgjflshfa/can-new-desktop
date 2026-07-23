@@ -141,6 +141,14 @@ pub async fn show_alert_popup(
 
     runtime_log::info(LOG_SOURCE, "Popup notification event emitted successfully");
 
+    // Windows-native sound after successful show+emit. Never fail the popup on sound errors.
+    if let Err(err) = crate::notification_sound::play_popup_notification_sound() {
+        runtime_log::warn(
+            LOG_SOURCE,
+            format!("Failed playing popup notification sound: {}", err).as_str(),
+        );
+    }
+
     Ok(revised_batch)
 }
 
