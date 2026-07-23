@@ -1,0 +1,27 @@
+name: Normalize release assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Draft release tag to normalize (for example v1.2.0)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: normalize-release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  normalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.1
+      - name: Normalize draft release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: python3 .github/scripts/normalize-release-assets.py --tag "${{ inputs.tag }}"
