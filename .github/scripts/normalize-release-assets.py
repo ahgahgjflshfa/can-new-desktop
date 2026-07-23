@@ -10,11 +10,14 @@ import re
 import subprocess
 import sys
 import tempfile
+import urllib.request
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 
-PRODUCT = "立馬幫幫忙"
+PRODUCT = "limabangbangmang"
+LABEL_PRODUCT = "立馬幫幫忙"
 
 
 def asset_mapping(name: str, version: str) -> str | None:
@@ -32,6 +35,36 @@ def asset_mapping(name: str, version: str) -> str | None:
     for pattern, canonical in patterns:
         if re.fullmatch(pattern, name):
             return canonical
+    return None
+
+
+def asset_label(name: str, version: str) -> str | None:
+    labels = {
+        f"{PRODUCT}-{version}-macos-aarch64.dmg": f"{LABEL_PRODUCT} {version} macOS Apple Silicon DMG",
+        f"{PRODUCT}-{version}-macos-aarch64.app.tar.gz": f"{LABEL_PRODUCT} {version} macOS Apple Silicon App",
+        f"{PRODUCT}-{version}-linux-x86_64.AppImage": f"{LABEL_PRODUCT} {version} Linux x86_64 AppImage",
+        f"{PRODUCT}-{version}-linux-x86_64.deb": f"{LABEL_PRODUCT} {version} Linux x86_64 DEB",
+        f"{PRODUCT}-{version}-linux-x86_64.rpm": f"{LABEL_PRODUCT} {version} Linux x86_64 RPM",
+        f"{PRODUCT}-{version}-windows-x86_64-setup.exe": f"{LABEL_PRODUCT} {version} Windows x86_64 安裝程式",
+        f"{PRODUCT}-{version}-windows-x86_64-zh-TW.msi": f"{LABEL_PRODUCT} {version} Windows x86_64 MSI",
+    }
+    return labels.get(name)
+
+
+def malformed_asset_mapping(name: str, version: str) -> str | None:
+    """Map only the dash-prefixed names produced by the failed gh upload run."""
+    targets = (
+        f"{PRODUCT}-{version}-macos-aarch64.dmg",
+        f"{PRODUCT}-{version}-macos-aarch64.app.tar.gz",
+        f"{PRODUCT}-{version}-linux-x86_64.AppImage",
+        f"{PRODUCT}-{version}-linux-x86_64.deb",
+        f"{PRODUCT}-{version}-linux-x86_64.rpm",
+        f"{PRODUCT}-{version}-windows-x86_64-setup.exe",
+        f"{PRODUCT}-{version}-windows-x86_64-zh-TW.msi",
+    )
+    for target in targets:
+        if name == target.removeprefix(PRODUCT):
+            return target
     return None
 
 
@@ -54,9 +87,41 @@ def find_release_by_tag(releases: list[Any], tag: str) -> dict | None:
     return next((release for release in candidates if release.get("tag_name") == tag), None)
 
 
-def upload_command(tag: str, repo: str, path: Path) -> list[str]:
-    """Build an upload command without clobbering a concurrent canonical asset."""
-    return ["release", "upload", tag, str(path), "--repo", repo]
+def upload_asset_url(repo: str, release_id: int, name: str, label: str) -> str:
+    return (
+        f"https://uploads.github.com/repos/{repo}/releases/{release_id}/assets"
+        f"?name={quote(name, safe='')}&label={quote(label, safe='')}"
+    )
+
+
+def upload_asset(token: str, repo: str, release_id: int, name: str, label: str, path: Path) -> None:
+    """Upload through REST so Unicode in the asset name is never shell-parsed."""
+    request = urllib.request.Request(
+        upload_asset_url(repo, release_id, name, label),
+        data=path.read_bytes(),
+        method="POST",
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/octet-stream",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=120) as response:
+        uploaded = json.loads(response.read())
+    if not uploaded_asset_matches(uploaded, name, label):
+        raise RuntimeError(
+            f"GitHub returned unexpected uploaded asset metadata: "
+            f"name={uploaded.get('name')!r}, label={uploaded.get('label')!r}"
+        )
+
+
+def uploaded_asset_matches(asset: dict, name: str, label: str) -> bool:
+    return asset.get("name") == name and asset.get("label") == label
+
+
+def ensure_draft_before_cleanup(release: dict) -> None:
+    if release.get("draft") is not True:
+        raise RuntimeError("release is no longer a draft; refusing cleanup")
 
 
 def release_endpoint(repo: str, release_id: int) -> str:
@@ -80,6 +145,15 @@ def matched_asset_operations(assets: list[dict], version: str) -> list[tuple[dic
             print(f"retain cleanup for {old_name}: {new_name} already exists")
         operations.append((asset, new_name, needs_upload))
     return operations
+
+
+def malformed_cleanup_operations(assets: list[dict], version: str) -> list[tuple[dict, str]]:
+    """Return cleanup candidates restricted to the seven known failed names."""
+    return [
+        (asset, target)
+        for asset in assets
+        if (target := malformed_asset_mapping(asset["name"], version)) is not None
+    ]
 
 
 def main() -> int:
@@ -108,19 +182,31 @@ def main() -> int:
 
     assets = release.get("assets", [])
     operations = matched_asset_operations(assets, version)
+    by_name = {asset["name"]: asset for asset in assets}
+    malformed_cleanup = malformed_cleanup_operations(assets, version)
+    operation_targets = {new_name for _, new_name, _ in operations}
+    for asset, target in malformed_cleanup:
+        if target not in by_name and target not in operation_targets:
+            operations.append((asset, target, True))
+            operation_targets.add(target)
+        else:
+            print(f"retain malformed cleanup for {asset['name']}: {target}")
 
-    if not operations:
+    if not operations and not malformed_cleanup:
         print("No Tauri default assets require normalization.")
         return 0
     for asset, new_name, needs_upload in operations:
-        print(f"{asset['name']} -> {new_name}")
+        label = asset_label(new_name, version)
+        if label is None:
+            raise RuntimeError(f"no label mapping for canonical asset {new_name}")
+        print(f"{asset['name']} -> {new_name} (label: {label})")
     if args.dry_run:
         return 0
 
     # Everything is downloaded before any upload. Old asset IDs are deleted only
     # after every replacement has uploaded and been observed in the release.
     with tempfile.TemporaryDirectory(prefix="release-assets-") as directory:
-        files: list[tuple[dict, str, Path]] = []
+        files: list[tuple[dict, str, str, Path]] = []
         for asset, new_name, needs_upload in operations:
             if not needs_upload:
                 continue
@@ -129,18 +215,34 @@ def main() -> int:
                 ["api", "-H", "Accept: application/octet-stream", asset["url"]],
                 output_file=destination,
             )
-            files.append((asset, new_name, destination))
+            label = asset_label(new_name, version)
+            if label is None:
+                raise RuntimeError(f"no label mapping for canonical asset {new_name}")
+            files.append((asset, new_name, label, destination))
 
-        for _, new_name, path in files:
-            run_gh(upload_command(args.tag, args.repo, path))
+        token = os.environ.get("GH_TOKEN")
+        if files:
+            if token is None:
+                raise RuntimeError("GH_TOKEN is required for REST asset upload")
+            for _, new_name, label, path in files:
+                upload_asset(token, args.repo, release["id"], new_name, label, path)
 
         refreshed = json.loads(run_gh(["api", release_api_endpoint]))
-        refreshed_names = {asset["name"] for asset in refreshed.get("assets", [])}
-        missing = [new_name for _, new_name, _ in operations if new_name not in refreshed_names]
+        refreshed_by_name = {asset["name"]: asset for asset in refreshed.get("assets", [])}
+        required_targets = operation_targets | {target for _, target in malformed_cleanup}
+        missing = [
+            target
+            for target in required_targets
+            if target not in refreshed_by_name
+            or not uploaded_asset_matches(refreshed_by_name[target], target, asset_label(target, version) or "")
+        ]
         if missing:
             raise RuntimeError("upload verification failed; old assets were left untouched: " + ", ".join(missing))
+        ensure_draft_before_cleanup(refreshed)
 
-        for asset, _, _ in operations:
+        cleanup_assets = {asset["id"]: asset for asset, _, _ in operations}
+        cleanup_assets.update({asset["id"]: asset for asset, _ in malformed_cleanup})
+        for asset in cleanup_assets.values():
             run_gh(["api", "--method", "DELETE", asset["url"]])
     return 0
 
