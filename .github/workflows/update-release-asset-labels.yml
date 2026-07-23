@@ -1,0 +1,27 @@
+name: Update release asset labels
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag whose canonical asset labels should be updated
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: normalize-release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  update-labels:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.1
+      - name: Update release asset labels
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: python3 .github/scripts/update-release-asset-labels.py --tag "${{ inputs.tag }}"

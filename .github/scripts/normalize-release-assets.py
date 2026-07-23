@@ -40,13 +40,13 @@ def asset_mapping(name: str, version: str) -> str | None:
 
 def asset_label(name: str, version: str) -> str | None:
     labels = {
-        f"{PRODUCT}-{version}-macos-aarch64.dmg": f"{LABEL_PRODUCT} {version} macOS Apple Silicon DMG",
-        f"{PRODUCT}-{version}-macos-aarch64.app.tar.gz": f"{LABEL_PRODUCT} {version} macOS Apple Silicon App",
-        f"{PRODUCT}-{version}-linux-x86_64.AppImage": f"{LABEL_PRODUCT} {version} Linux x86_64 AppImage",
-        f"{PRODUCT}-{version}-linux-x86_64.deb": f"{LABEL_PRODUCT} {version} Linux x86_64 DEB",
-        f"{PRODUCT}-{version}-linux-x86_64.rpm": f"{LABEL_PRODUCT} {version} Linux x86_64 RPM",
-        f"{PRODUCT}-{version}-windows-x86_64-setup.exe": f"{LABEL_PRODUCT} {version} Windows x86_64 安裝程式",
-        f"{PRODUCT}-{version}-windows-x86_64-zh-TW.msi": f"{LABEL_PRODUCT} {version} Windows x86_64 MSI",
+        f"{PRODUCT}-{version}-macos-aarch64.dmg": f"{LABEL_PRODUCT}-{version}-macOS-AppleSilicon.dmg",
+        f"{PRODUCT}-{version}-macos-aarch64.app.tar.gz": f"{LABEL_PRODUCT}-{version}-macOS-AppleSilicon.app.tar.gz",
+        f"{PRODUCT}-{version}-linux-x86_64.AppImage": f"{LABEL_PRODUCT}-{version}-Linux-x64.AppImage",
+        f"{PRODUCT}-{version}-linux-x86_64.deb": f"{LABEL_PRODUCT}-{version}-Linux-x64.deb",
+        f"{PRODUCT}-{version}-linux-x86_64.rpm": f"{LABEL_PRODUCT}-{version}-Linux-x64.rpm",
+        f"{PRODUCT}-{version}-windows-x86_64-setup.exe": f"{LABEL_PRODUCT}-{version}-Windows-x64.exe",
+        f"{PRODUCT}-{version}-windows-x86_64-zh-TW.msi": f"{LABEL_PRODUCT}-{version}-Windows-x64.msi",
     }
     return labels.get(name)
 

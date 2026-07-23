@@ -43,13 +43,13 @@ class AssetMappingTests(unittest.TestCase):
 
     def test_v120_canonical_labels(self):
         expected = {
-            "limabangbangmang-1.2.0-macos-aarch64.dmg": "立馬幫幫忙 1.2.0 macOS Apple Silicon DMG",
-            "limabangbangmang-1.2.0-macos-aarch64.app.tar.gz": "立馬幫幫忙 1.2.0 macOS Apple Silicon App",
-            "limabangbangmang-1.2.0-linux-x86_64.AppImage": "立馬幫幫忙 1.2.0 Linux x86_64 AppImage",
-            "limabangbangmang-1.2.0-linux-x86_64.deb": "立馬幫幫忙 1.2.0 Linux x86_64 DEB",
-            "limabangbangmang-1.2.0-linux-x86_64.rpm": "立馬幫幫忙 1.2.0 Linux x86_64 RPM",
-            "limabangbangmang-1.2.0-windows-x86_64-setup.exe": "立馬幫幫忙 1.2.0 Windows x86_64 安裝程式",
-            "limabangbangmang-1.2.0-windows-x86_64-zh-TW.msi": "立馬幫幫忙 1.2.0 Windows x86_64 MSI",
+            "limabangbangmang-1.2.0-macos-aarch64.dmg": "立馬幫幫忙-1.2.0-macOS-AppleSilicon.dmg",
+            "limabangbangmang-1.2.0-macos-aarch64.app.tar.gz": "立馬幫幫忙-1.2.0-macOS-AppleSilicon.app.tar.gz",
+            "limabangbangmang-1.2.0-linux-x86_64.AppImage": "立馬幫幫忙-1.2.0-Linux-x64.AppImage",
+            "limabangbangmang-1.2.0-linux-x86_64.deb": "立馬幫幫忙-1.2.0-Linux-x64.deb",
+            "limabangbangmang-1.2.0-linux-x86_64.rpm": "立馬幫幫忙-1.2.0-Linux-x64.rpm",
+            "limabangbangmang-1.2.0-windows-x86_64-setup.exe": "立馬幫幫忙-1.2.0-Windows-x64.exe",
+            "limabangbangmang-1.2.0-windows-x86_64-zh-TW.msi": "立馬幫幫忙-1.2.0-Windows-x64.msi",
         }
         for name, label in expected.items():
             self.assertEqual(normalize.asset_label(name, "1.2.0"), label)
@@ -78,15 +78,15 @@ class AssetMappingTests(unittest.TestCase):
 
     def test_rest_upload_url_percent_encodes_unicode_name(self):
         name = "limabangbangmang-1.2.0-linux-x86_64.deb"
-        label = "立馬幫幫忙 1.2.0 Linux x86_64 DEB"
+        label = "立馬幫幫忙-1.2.0-Linux-x64.deb"
         url = normalize.upload_asset_url("owner/repo", 120, name, label)
         self.assertIn("name=limabangbangmang-1.2.0-linux-x86_64.deb", url)
-        self.assertIn("label=%E7%AB%8B%E9%A6%AC%E5%B9%AB%E5%B9%AB%E5%BF%99%201.2.0%20Linux%20x86_64%20DEB", url)
+        self.assertIn("label=%E7%AB%8B%E9%A6%AC%E5%B9%AB%E5%B9%AB%E5%BF%99-1.2.0-Linux-x64.deb", url)
         self.assertNotIn("立馬幫幫忙", url)
 
     def test_uploaded_asset_requires_exact_name_and_label(self):
         name = "limabangbangmang-1.2.0-linux-x86_64.deb"
-        label = "立馬幫幫忙 1.2.0 Linux x86_64 DEB"
+        label = "立馬幫幫忙-1.2.0-Linux-x64.deb"
         self.assertTrue(normalize.uploaded_asset_matches({"name": name, "label": label}, name, label))
         self.assertFalse(normalize.uploaded_asset_matches({"name": name, "label": "wrong"}, name, label))
 
