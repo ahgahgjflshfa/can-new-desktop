@@ -19,6 +19,12 @@ pub struct NotificationPayload {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
+pub struct PopupNotificationBatch {
+    pub notifications: Vec<NotificationPayload>,
+    pub revision: u64,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 pub struct DismissPayload {
     #[serde(rename = "notificationId")]
     pub notification_id: Option<String>,

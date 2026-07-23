@@ -25,3 +25,20 @@ export interface NotificationApiResponse {
   serverTime: string
   nextPollHint?: number
 }
+
+export interface PopupNotificationPayload {
+  id: string
+  title: string
+  body: string
+  priority: NotificationPriority
+  category?: string
+  createdAt: string
+  unreadCount: number
+  metadata?: Record<string, unknown>
+  revision?: number
+}
+
+export interface PopupNotificationBatch {
+  notifications: PopupNotificationPayload[]
+  revision: number
+}

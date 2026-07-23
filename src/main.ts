@@ -28,7 +28,10 @@ authStore.init()
 void initializeNotificationRuntime({
   notificationStore,
   authStore,
-  onOpenSystem: system => systemStore.switchView(system),
+  onOpenSystem: system => {
+    systemStore.switchView(system)
+    notificationStore.handlePopupOpened()
+  },
 })
 
 if (import.meta.hot) {

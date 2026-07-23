@@ -25,6 +25,7 @@ const DEFAULT_POLLING_INTERVAL = 10000
 const MIN_POLLING_INTERVAL_SECONDS = 5
 const MAX_POLLING_INTERVAL_SECONDS = 300
 const IN_APP_REMINDER_MS = 4000
+const GLOBAL_POPUP_REMINDER_MS = 60_000
 const REPLIED_ESCALATION_MS = 15 * 60 * 1000
 const CAN_NOTIFICATION_CATEGORY = 'Q 潔淨立馬清'
 type NotificationSystem = SystemType
@@ -119,6 +120,13 @@ let inAppReminderTimeoutId: ReturnType<typeof setTimeout> | null = null
 let popupNativeOperation: Promise<void> = Promise.resolve()
 let reminderCyclePromise: Promise<void> | null = null
 let reminderCycleDirty = false
+let globalPopupReminderTimeoutId: ReturnType<typeof setTimeout> | null = null
+let globalReminderIntentEpoch: number | null = null
+let lastPopupBatchKey: string | null = null
+let popupBatchInFlightKey: string | null = null
+let globalPopupReminderArmed = false
+let globalPopupReminderEpoch = 0
+const POPUP_SUPPRESSED = Symbol('popup-suppressed')
 
 function serializePopupOperation<T>(operation: () => Promise<T>): Promise<T> {
   if (!getLmaNotificationController()) return operation()
@@ -132,6 +140,11 @@ function clearInAppReminderTimeout(): void {
     clearTimeout(inAppReminderTimeoutId)
     inAppReminderTimeoutId = null
   }
+}
+
+function clearGlobalPopupReminder(): void {
+  if (globalPopupReminderTimeoutId !== null) clearTimeout(globalPopupReminderTimeoutId)
+  globalPopupReminderTimeoutId = null
 }
 
 function isMainWindowActive(): boolean {
@@ -269,6 +282,8 @@ export const useNotificationStore = defineStore('notifications', {
     taskActionError: null as string | null,
     lmaActionEpoch: 0,
     lmaPopupIdentity: null as { principal: string; revision: number } | null,
+    // Native close can arrive before show_alert_popup resolves.
+    popupClosedRevision: 0,
     inAppReminderVisible: false,
     inAppReminderCount: 0,
     isPopupVisible: false,
@@ -489,11 +504,28 @@ export const useNotificationStore = defineStore('notifications', {
     },
 
     async runReminderCycleNow() {
-      const candidates = this.getReminderCandidates()
+      const isGlobalReminder = globalReminderIntentEpoch === globalPopupReminderEpoch
+      if (globalReminderIntentEpoch !== null && !isGlobalReminder) globalReminderIntentEpoch = null
+      // Opening the main window starts a quiet period. Polling, focus, and
+      // blur notifications must not compete with the user's active work until
+      // the single shared reminder deadline fires.
+      if (globalPopupReminderArmed && !isGlobalReminder) return
+
+      let candidates = isGlobalReminder
+        ? this.getUnresolvedNotifications().filter(notification => {
+          const system = getNotificationSystem(notification)
+          return system !== null && (system === 'lma' ? this.lmaRuntimeActive : system === 'can' ? this.canRuntimeActive : this.chargeRuntimeActive)
+        })
+        : this.getReminderCandidates()
+      if (isGlobalReminder) {
+        const activeSystem = useSystemStore().currentView
+        candidates = candidates.filter(notification => getNotificationSystem(notification) !== activeSystem)
+      }
+      if (isGlobalReminder) globalReminderIntentEpoch = null
       const target = this.getReminderTarget(candidates)
       if (!target) {
         this.clearReminderSignals()
-        await this.hidePopup()
+        await this.hidePopup(isGlobalReminder)
         return
       }
 
@@ -510,9 +542,30 @@ export const useNotificationStore = defineStore('notifications', {
       }
 
       this.hideInAppReminder()
-      if (this.currentNotification?.id !== target.id || target.status !== 'shown' || !this.isPopupVisible) {
-        await this.showNotification(target.id)
+      if (candidates.length > 0 || this.currentNotification?.id !== target.id || target.status !== 'shown' || !this.isPopupVisible) {
+        await this.showNotification(target.id, candidates, isGlobalReminder)
       }
+    },
+
+    scheduleGlobalPopupReminder() {
+      clearGlobalPopupReminder()
+      globalPopupReminderTimeoutId = setTimeout(() => {
+        globalPopupReminderTimeoutId = null
+        globalPopupReminderEpoch++
+        globalPopupReminderArmed = false
+        globalReminderIntentEpoch = globalPopupReminderEpoch
+        void this.runReminderCycle().catch(err => logAppEvent('warn', 'notifications', 'global popup reminder failed', err))
+      }, GLOBAL_POPUP_REMINDER_MS)
+    },
+
+    handlePopupOpened() {
+      this.isPopupVisible = false
+      lastPopupBatchKey = null
+      popupBatchInFlightKey = null
+      globalPopupReminderEpoch++
+      globalReminderIntentEpoch = null
+      globalPopupReminderArmed = true
+      this.scheduleGlobalPopupReminder()
     },
 
     async runReminderCycle() {
@@ -609,7 +662,9 @@ export const useNotificationStore = defineStore('notifications', {
     },
 
     handlePopupClosedEvent(notificationId: string | null, revision = 0) {
-      if (revision > 0 && this.lmaPopupIdentity && revision !== this.lmaPopupIdentity.revision) return
+      if (revision > 0 && revision < this.popupClosedRevision) return
+      if (revision > 0 && this.lmaPopupIdentity && revision < this.lmaPopupIdentity.revision) return
+      if (revision > 0) this.popupClosedRevision = revision
       if (notificationId) {
         const notification = this.notifications.find(n => n.id === notificationId)
         if (notification && notification.status !== 'dismissed') {
@@ -619,7 +674,9 @@ export const useNotificationStore = defineStore('notifications', {
         if (this.currentNotification?.id === notificationId) this.currentNotification = null
       }
       this.isPopupVisible = false
-      if (this.lmaPopupIdentity?.revision === revision) this.lmaPopupIdentity = null
+      if (revision > 0 && this.lmaPopupIdentity && this.lmaPopupIdentity.revision <= revision) {
+        this.lmaPopupIdentity = null
+      }
       void this.runReminderCycle()
     },
 
@@ -628,7 +685,13 @@ export const useNotificationStore = defineStore('notifications', {
       popupNativeOperation = Promise.resolve()
       reminderCyclePromise = null
       reminderCycleDirty = false
+      this.popupClosedRevision = 0
+      lastPopupBatchKey = null
+      popupBatchInFlightKey = null
+      globalPopupReminderArmed = false
+      globalPopupReminderEpoch++
       clearInAppReminderTimeout()
+      clearGlobalPopupReminder()
       if (_dismissEventUnlisten) {
         _dismissEventUnlisten()
         _dismissEventUnlisten = null
@@ -950,7 +1013,7 @@ export const useNotificationStore = defineStore('notifications', {
       await triggerCanNotificationRuntime()
     },
 
-    async showNotification(notificationId: string) {
+    async showNotification(notificationId: string, popupCandidates?: NotificationState[], inactiveSystemsOnly = false) {
       const notification = this.notifications.find(n => n.id === notificationId)
       if (!notification) return
       const system = getNotificationSystem(notification)
@@ -959,15 +1022,16 @@ export const useNotificationStore = defineStore('notifications', {
         (system === 'can' && !this.canRuntimeActive) ||
         (system === 'charge' && !this.chargeRuntimeActive)) return
 
-      if (this.currentNotification?.id === notificationId && notification.status === 'shown' && this.isPopupVisible) {
+      if (!popupCandidates && this.currentNotification?.id === notificationId && notification.status === 'shown' && this.isPopupVisible) {
         return
       }
 
-      notification.status = 'shown'
-      this.currentNotification = notification
-      this.isPopupVisible = true
-
-      if (!isTauriRuntime()) return
+      if (!isTauriRuntime()) {
+        notification.status = 'shown'
+        this.currentNotification = notification
+        this.isPopupVisible = true
+        return
+      }
 
       if (isMainWindowActive() && isNotificationForCurrentView(notification)) {
         this.isPopupVisible = false
@@ -981,26 +1045,82 @@ export const useNotificationStore = defineStore('notifications', {
         })
         const capturedPrincipal = typeof notification.metadata?.principal === 'string' ? notification.metadata.principal : ''
         const capturedEpoch = this.lmaActionEpoch
-        const shown = await serializePopupOperation(() => invoke<{ revision: number }>('show_alert_popup', {
-          notification: {
-            id: notification.id,
-            title: notification.title,
-            body: notification.body,
-            priority: notification.priority,
-            category: notification.category,
-            createdAt: notification.createdAt,
-            unreadCount: this.unreadCount,
-            metadata: notification.metadata,
-          },
-        }))
-        if (shown && capturedPrincipal && capturedEpoch === this.lmaActionEpoch && this.lmaPrincipal === capturedPrincipal && this.currentNotification === notification) {
-          this.lmaPopupIdentity = { principal: capturedPrincipal, revision: shown.revision }
-        } else if (shown && capturedPrincipal && capturedEpoch !== this.lmaActionEpoch && isTauriRuntime()) {
+        const candidateSystems = new Set(
+          (popupCandidates ?? [])
+            .map(item => getNotificationSystem(item))
+            .filter((system): system is NotificationSystem => system !== null)
+        )
+        const popupNotifications = (inactiveSystemsOnly
+          ? this.getUnresolvedNotifications().filter(item => candidateSystems.has(getNotificationSystem(item) as NotificationSystem))
+          : this.getUnresolvedNotifications())
+          .filter(item => {
+            const itemSystem = getNotificationSystem(item)
+            return itemSystem !== null && (itemSystem === 'lma' ? this.lmaRuntimeActive : itemSystem === 'can' ? this.canRuntimeActive : this.chargeRuntimeActive)
+          })
+          .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+        const popupPayloads = popupNotifications.map(item => ({
+            id: item.id, title: item.title, body: item.body, priority: item.priority,
+            category: item.category, createdAt: item.createdAt, unreadCount: this.unreadCount,
+            metadata: item.metadata,
+          }))
+        const popupBatchKey = JSON.stringify({
+          inactiveSystemsOnly,
+          notifications: popupPayloads.map(item => ({
+            id: item.id,
+            title: item.title,
+            body: item.body,
+            priority: item.priority,
+            category: item.category,
+            createdAt: item.createdAt,
+            unreadCount: item.unreadCount,
+            metadata: item.metadata,
+          })),
+        })
+        if ((this.isPopupVisible || this.popupClosedRevision > 0) &&
+          (lastPopupBatchKey === popupBatchKey || popupBatchInFlightKey === popupBatchKey)) return
+        popupBatchInFlightKey = popupBatchKey
+        const popupOperationEpoch = globalPopupReminderEpoch
+        // `notification` is retained as a compatibility alias for older popup
+        // builds; the backend uses the complete ordered `notifications` list.
+        const shown = await serializePopupOperation(async () => {
+          if (popupOperationEpoch !== globalPopupReminderEpoch || (!inactiveSystemsOnly && globalPopupReminderArmed)) return POPUP_SUPPRESSED
+          const result = await invoke<{ revision: number }>('show_alert_popup', {
+            notifications: popupPayloads,
+            notification: popupPayloads[popupPayloads.length - 1],
+          })
+          if (popupOperationEpoch !== globalPopupReminderEpoch || (!inactiveSystemsOnly && globalPopupReminderArmed)) {
+            await invoke('hide_alert_popup')
+            return POPUP_SUPPRESSED
+          }
+          return result
+        })
+        if (shown === POPUP_SUPPRESSED) {
+          if (popupBatchInFlightKey === popupBatchKey) popupBatchInFlightKey = null
+          return
+        }
+        const shownPayload = shown as { revision?: number } | undefined
+        lastPopupBatchKey = popupBatchKey
+        if (popupBatchInFlightKey === popupBatchKey) popupBatchInFlightKey = null
+        const closeWonBeforeCommandReturned = Boolean(shownPayload?.revision && shownPayload.revision <= this.popupClosedRevision)
+        if (!closeWonBeforeCommandReturned) {
+          notification.status = 'shown'
+          this.currentNotification = notification
+          this.isPopupVisible = true
+        }
+        if (closeWonBeforeCommandReturned) {
+          this.isPopupVisible = false
+          if (this.lmaPopupIdentity?.revision && this.lmaPopupIdentity.revision <= (shownPayload?.revision ?? 0)) {
+            this.lmaPopupIdentity = null
+          }
+        } else if (shownPayload?.revision && capturedPrincipal && capturedEpoch === this.lmaActionEpoch && this.lmaPrincipal === capturedPrincipal && this.currentNotification === notification) {
+          this.lmaPopupIdentity = { principal: capturedPrincipal, revision: shownPayload.revision }
+        } else if (shownPayload?.revision && capturedPrincipal && capturedEpoch !== this.lmaActionEpoch && isTauriRuntime()) {
           void invoke('clear_alert_popup_system', {
-            system: 'lma', expectedPrincipal: capturedPrincipal, expectedRevision: shown.revision,
+            system: 'lma', expectedPrincipal: capturedPrincipal, expectedRevision: shownPayload.revision,
           }).catch(error => logAppEvent('warn', 'notifications', 'failed to clear stale deferred popup', error))
         }
       } catch (err) {
+        popupBatchInFlightKey = null
         notification.status = 'pending'
         if (this.currentNotification?.id === notification.id) {
           this.currentNotification = null
@@ -1175,11 +1295,17 @@ export const useNotificationStore = defineStore('notifications', {
       this.dismissAllNotificationsInternal()
     },
 
-    async hidePopup() {
+    async hidePopup(allowReminderDeadline = false) {
       this.isPopupVisible = false
+      lastPopupBatchKey = null
+      popupBatchInFlightKey = null
       if (isTauriRuntime()) {
         try {
-          await serializePopupOperation(() => invoke('hide_alert_popup'))
+          const popupOperationEpoch = globalPopupReminderEpoch
+          await serializePopupOperation(async () => {
+            if (!allowReminderDeadline && (globalPopupReminderArmed || popupOperationEpoch !== globalPopupReminderEpoch)) return undefined
+            return invoke('hide_alert_popup')
+          })
         } catch (err) {
           logAppEvent('warn', 'notifications', 'failed to hide alert popup', err)
           console.warn('Failed to hide alert popup:', err)

@@ -1,11 +1,10 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { emit, listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import { logAppEvent } from '@/services/appLogger'
 import type { NotificationPriority } from '@/types/notification'
-import { isSystemType } from '@/types/system'
-import type { SystemType } from '@/types/system'
+import { isSystemType, type SystemType } from '@/types/system'
 import { PopupRevisionGate, shouldClearLmaPopup } from '@/services/popupRevision'
 
 interface NotificationPayload {
@@ -17,136 +16,138 @@ interface NotificationPayload {
   createdAt: string
   unreadCount: number
   metadata?: Record<string, unknown>
-  revision: number
+  revision?: number
 }
 
-interface PopupClearedPayload { system: SystemType; revision: number }
+interface NotificationSnapshot {
+  revision: number
+  notifications: NotificationPayload[]
+}
 
-const currentNotification = ref<NotificationPayload | null>(null)
-const revisionGate = new PopupRevisionGate<NotificationPayload>()
+interface PopupClearedPayload { system?: SystemType; revision: number }
+interface GatePayload { id: string; revision: number }
+
+const currentSnapshot = ref<NotificationSnapshot | null>(null)
+// Keep the gate in the popup. Events and the pending read can arrive in either order.
+const revisionGate = new PopupRevisionGate<GatePayload>()
 let unlistenShow: UnlistenFn | null = null
 let unlistenCleared: UnlistenFn | null = null
-let lastSoundRevision = 0
 
-function acceptNotification(notification: NotificationPayload): void {
-  const revision = Number.isFinite(notification.revision) ? notification.revision : 0
-  const result = revisionGate.accept({ ...notification, revision })
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
+}
+
+function asNotifications(value: unknown): NotificationPayload[] {
+  if (!Array.isArray(value)) return []
+  return value.filter(item => {
+    const record = asRecord(item)
+    return typeof record?.id === 'string' && typeof record?.title === 'string'
+  }) as NotificationPayload[]
+}
+
+/** Accept the old single-notification wire format while the Rust lane rolls out snapshots. */
+function normalizeSnapshot(value: unknown): NotificationSnapshot | null {
+  const record = asRecord(value)
+  if (!record) return null
+
+  const notifications = Array.isArray(record.notifications)
+    ? asNotifications(record.notifications)
+    : [record as unknown as NotificationPayload]
+  const revisions = notifications.map(item => Number(item.revision)).filter(Number.isFinite)
+  const revision = Number(record.revision)
+  const resolvedRevision = Number.isFinite(revision) ? revision : Math.max(0, ...revisions)
+  return { revision: resolvedRevision, notifications: notifications.map(item => ({ ...item, revision: Number.isFinite(Number(item.revision)) ? Number(item.revision) : resolvedRevision })) }
+}
+
+function systemFor(notification: NotificationPayload): SystemType | null {
+  const value = notification.metadata?.system
+  if (value === undefined) return 'lma' // legacy notifications were LMA alerts
+  return isSystemType(value) ? value : null
+}
+
+function acceptSnapshot(value: unknown): void {
+  const snapshot = normalizeSnapshot(value)
+  if (!snapshot || !Number.isFinite(snapshot.revision)) return
+  const result = revisionGate.accept({ id: `snapshot-${snapshot.revision}`, revision: snapshot.revision })
   if (!result.accepted) return
-  currentNotification.value = revisionGate.currentPayload
-  if (result.playSound) {
-    lastSoundRevision = revision
-    playNotificationSound()
-  }
-  void invoke('ack_popup_displayed', { notificationId: notification.id, revision }).catch(err =>
-    logAppEvent('warn', 'popup', 'failed to acknowledge displayed notification', err))
+
+  currentSnapshot.value = snapshot.notifications.length ? snapshot : null
+  if (result.playSound) playNotificationSound()
+
+  // A snapshot is one display unit. Do not acknowledge individual items: the
+  // Rust command is moving to explicit batch-revision semantics.
+  void invoke('ack_popup_displayed', { revision: snapshot.revision }).catch(err =>
+    logAppEvent('warn', 'popup', 'failed to acknowledge displayed snapshot', err))
 }
 
 function playNotificationSound() {
-  if (typeof window === 'undefined') return
-
-  const AudioContextConstructor = window.AudioContext
-  if (!AudioContextConstructor) {
-    logAppEvent('warn', 'popup', 'notification sound unavailable because AudioContext is unsupported')
-    return
-  }
-
+  if (typeof window === 'undefined' || !window.AudioContext) return
   try {
-    const audioContext = new AudioContextConstructor()
-    const oscillator = audioContext.createOscillator()
-    const gain = audioContext.createGain()
-    const now = audioContext.currentTime
-
+    const context = new window.AudioContext()
+    const oscillator = context.createOscillator()
+    const gain = context.createGain()
+    const now = context.currentTime
     oscillator.type = 'sine'
     oscillator.frequency.setValueAtTime(880, now)
     oscillator.frequency.setValueAtTime(660, now + 0.12)
-
     gain.gain.setValueAtTime(0.0001, now)
     gain.gain.exponentialRampToValueAtTime(0.18, now + 0.02)
     gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.35)
-
     oscillator.connect(gain)
-    gain.connect(audioContext.destination)
-
+    gain.connect(context.destination)
     oscillator.start(now)
     oscillator.stop(now + 0.36)
-
-    oscillator.addEventListener('ended', () => {
-      void audioContext.close().catch(err => {
-        logAppEvent('warn', 'popup', 'failed to close notification sound audio context', err)
-      })
-    })
+    oscillator.addEventListener('ended', () => { void context.close().catch(() => undefined) })
   } catch (err) {
     logAppEvent('warn', 'popup', 'failed to play notification sound', err)
   }
 }
 
-const priorityConfig: Record<
-  NotificationPriority,
-  {
-    barClass: string
-    iconClass: string
-    iconBgClass: string
-    badgeClass: string
-    label: string
-  }
-> = {
-  pending: {
-    barClass: 'bg-[var(--app-danger)]',
-    iconClass: 'i-mdi-alert-circle',
-    iconBgClass: 'bg-[color:rgba(196,91,91,0.12)] text-[var(--app-danger)]',
-    badgeClass: 'bg-[color:rgba(196,91,91,0.14)] text-[var(--app-danger)]',
-    label: '待處理',
-  },
-  replied: {
-    barClass: 'bg-[var(--app-warning)]',
-    iconClass: 'i-mdi-progress-clock',
-    iconBgClass: 'bg-[color:rgba(212,139,42,0.12)] text-[var(--app-warning)]',
-    badgeClass: 'bg-[color:rgba(212,139,42,0.14)] text-[var(--app-warning)]',
-    label: '已回覆',
-  },
-  completed: {
-    barClass: 'bg-[var(--app-success)]',
-    iconClass: 'i-mdi-check-circle',
-    iconBgClass: 'bg-[color:rgba(63,143,107,0.12)] text-[var(--app-success)]',
-    badgeClass: 'bg-[color:rgba(63,143,107,0.14)] text-[var(--app-success)]',
-    label: '已完成',
-  },
-  ignored: {
-    barClass: 'bg-[var(--app-muted-2)]',
-    iconClass: 'i-mdi-eye-off',
-    iconBgClass: 'bg-[color:rgba(147,143,153,0.12)] text-[var(--app-muted-2)]',
-    badgeClass: 'bg-[color:rgba(147,143,153,0.14)] text-[var(--app-muted-2)]',
-    label: '已忽略',
-  },
+const priorityConfig: Record<NotificationPriority, { bar: string; icon: string; label: string }> = {
+  pending: { bar: 'bg-[var(--app-danger)]', icon: 'i-mdi-alert-circle', label: '待處理' },
+  replied: { bar: 'bg-[var(--app-warning)]', icon: 'i-mdi-progress-clock', label: '已回覆' },
+  completed: { bar: 'bg-[var(--app-success)]', icon: 'i-mdi-check-circle', label: '已完成' },
+  ignored: { bar: 'bg-[var(--app-muted-2)]', icon: 'i-mdi-eye-off', label: '已忽略' },
 }
 
-const currentPriorityConfig = computed(() => {
-  if (!currentNotification.value) return priorityConfig.pending
-  if (currentNotification.value.priority in priorityConfig) {
-    return priorityConfig[currentNotification.value.priority]
+const groups = computed(() => {
+  const all = currentSnapshot.value?.notifications ?? []
+  return (['lma', 'can', 'charge'] as SystemType[]).map(system => ({
+    system,
+    label: system === 'lma' ? 'LMA' : system === 'can' ? 'CAN' : 'Charge',
+    items: all.filter(item => systemFor(item) === system),
+  })).filter(group => group.items.length)
+})
+
+function metadataText(notification: NotificationPayload, keys: string[]): string | null {
+  for (const key of keys) {
+    const value = notification.metadata?.[key]
+    if (typeof value === 'string' || typeof value === 'number') return String(value)
   }
-  return priorityConfig.pending
-})
-
-const priorityBarClass = computed(() => currentPriorityConfig.value.barClass)
-const priorityIconBgClass = computed(() => currentPriorityConfig.value.iconBgClass)
-const priorityBadgeClass = computed(() => currentPriorityConfig.value.badgeClass)
-
-const formattedTime = computed(() => {
-  if (!currentNotification.value) return ''
-  const date = new Date(currentNotification.value.createdAt)
-  return date.toLocaleString()
-})
-
-function getNotificationSystem(metadata?: Record<string, unknown>): SystemType | null {
-  if (!metadata || !('system' in metadata)) return 'lma'
-  const system = metadata.system
-  return isSystemType(system) ? system : null
+  return null
 }
 
-const notificationSystem = computed<SystemType | null>(() =>
-  getNotificationSystem(currentNotification.value?.metadata)
-)
+function detailFor(notification: NotificationPayload, system: SystemType): string {
+  if (system === 'lma') {
+    const task = metadataText(notification, ['task', 'taskName', 'task_name'])
+    const location = metadataText(notification, ['location', 'locationName', 'location_name'])
+    return [task, location].filter(Boolean).join(' · ') || notification.body
+  }
+  const keys = system === 'can'
+    ? ['trashBinCode', 'trash_bin_code', 'binCode', 'bin_code', 'trashBin', 'code']
+    : ['deviceCode', 'device_code', 'chargerCode', 'charger_code', 'device', 'charger', 'code']
+  return metadataText(notification, keys) || notification.body
+}
+
+function timeFor(notification: NotificationPayload): string {
+  const date = new Date(notification.createdAt)
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
+const notificationSystem = computed<SystemType | null>(() => {
+  const first = currentSnapshot.value?.notifications[0]
+  return first ? systemFor(first) : null
+})
 
 async function openMainWindow() {
   const targetSystem = notificationSystem.value
@@ -165,122 +166,83 @@ async function openMainWindow() {
 }
 
 onMounted(async () => {
-  unlistenShow = await listen<NotificationPayload>('show-notification', event => {
-    console.log('[Popup] Received show-notification event:', event.payload)
+  unlistenShow = await listen<unknown>('show-notification', event => {
     logAppEvent('info', 'popup', 'received show-notification event', event.payload)
-    acceptNotification(event.payload)
+    acceptSnapshot(event.payload)
   })
-
   unlistenCleared = await listen<PopupClearedPayload>('popup-cleared', event => {
     revisionGate.clear(event.payload.revision)
-    if (currentNotification.value !== null && shouldClearLmaPopup(
-      event.payload.system,
-      typeof currentNotification.value.metadata?.system === 'string' ? currentNotification.value.metadata.system : null,
-      currentNotification.value.revision,
+    const snapshot = currentSnapshot.value
+    if (!snapshot) return
+    // Newer closure events may only carry the snapshot revision. In that
+    // shape, close the complete batch rather than guessing at a task.
+    if (!event.payload.system) {
+      if (snapshot.revision <= event.payload.revision) currentSnapshot.value = null
+      return
+    }
+    const clearedSystem = event.payload.system
+    const remaining = snapshot.notifications.filter(notification => !shouldClearLmaPopup(
+      clearedSystem,
+      systemFor(notification),
+      snapshot.revision,
       event.payload.revision,
-    )) {
-      currentNotification.value = null
-    }
+    ))
+    currentSnapshot.value = remaining.length ? { ...snapshot, notifications: remaining } : null
   })
-
   try {
-    console.log('[Popup] Calling get_pending_notification...')
-    const pending = await invoke<NotificationPayload | null>('get_pending_notification')
-    console.log('[Popup] get_pending_notification returned:', pending)
-    if (pending) {
-      logAppEvent('info', 'popup', 'loaded pending notification on mount', { notificationId: pending.id })
-      acceptNotification(pending)
-    }
+    const pending = await invoke<unknown>('get_pending_notification')
+    if (pending) acceptSnapshot(pending)
   } catch (err) {
     logAppEvent('warn', 'popup', 'failed to get pending notification', err)
-    console.warn('[Popup] Failed to get pending notification:', err)
   }
 })
 
-onUnmounted(() => {
-  unlistenShow?.()
-  unlistenCleared?.()
-})
+onUnmounted(() => { unlistenShow?.(); unlistenCleared?.() })
 </script>
 
 <template>
-  <div
-    v-if="currentNotification"
-    class="h-screen w-screen flex flex-col overflow-hidden select-none bg-[var(--app-surface)] text-[var(--app-fg)] font-sans antialiased"
-  >
-    <!-- Priority indicator bar — thicker for pending to convey urgency -->
-    <div
-      class="shrink-0"
-      :class="[priorityBarClass, currentNotification.priority === 'pending' ? 'h-1' : 'h-[3px]']"
-    />
-
-    <!-- Content -->
-    <div class="flex-1 overflow-y-auto px-4 pt-3 pb-2 min-h-0">
-      <!-- Status row: priority + category + timestamp -->
-      <div class="flex items-center justify-between gap-2 mb-2">
-        <div class="flex items-center gap-1.5 shrink-0">
-          <span
-            class="inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[4px] text-[11px]"
-            :class="priorityIconBgClass"
-          >
-            <span :class="currentPriorityConfig.iconClass" />
-          </span>
-          <span
-            class="text-[11px] font-semibold whitespace-nowrap rounded-[3px] px-1.5 py-px"
-            :class="priorityBadgeClass"
-          >
-            {{ currentPriorityConfig.label }}
-          </span>
-          <span
-            v-if="currentNotification.category"
-            class="text-[11px] text-[var(--app-muted-2)] whitespace-nowrap"
-          >
-            · {{ currentNotification.category }}
-          </span>
+  <div v-if="currentSnapshot" class="h-screen w-screen flex flex-col overflow-hidden select-none bg-[var(--app-surface)] text-[var(--app-fg)] font-sans antialiased">
+    <div class="h-1 shrink-0 bg-[var(--app-primary)]" />
+    <main class="min-h-0 flex-1 overflow-y-auto px-4 pt-3 pb-2">
+      <div class="mb-3 flex items-end justify-between gap-3">
+        <div>
+          <p class="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--app-primary-strong)]">即時警示</p>
+          <h1 class="mt-0.5 text-[1.2rem] font-bold leading-tight text-[var(--app-fg-strong)]">待處理通知</h1>
         </div>
-        <span class="flex items-center gap-1 text-[11px] text-[var(--app-muted-2)] truncate">
-          <span class="i-mdi-clock-outline text-[11px]" />
-          {{ formattedTime }}
-        </span>
+        <span class="rounded-full bg-[var(--app-primary)]/10 px-2 py-1 text-[11px] font-semibold text-[var(--app-primary-strong)]">{{ currentSnapshot.notifications.length }} 筆</span>
       </div>
 
-      <!-- Title — strong visual weight -->
-      <h2 class="text-[1.3rem] font-bold text-[var(--app-fg-strong)] leading-tight mb-1 line-clamp-2">
-        {{ currentNotification.title }}
-      </h2>
-
-      <!-- Body — compact, clamped -->
-      <p class="text-[0.85rem] text-[var(--app-muted)] leading-relaxed line-clamp-3">
-        {{ currentNotification.body }}
-      </p>
-
-      <!-- Unread count -->
-      <div class="mt-2 text-[11px] font-semibold text-[var(--app-primary-strong)]">
-        {{ currentNotification.unreadCount }} 筆待處理
-      </div>
-    </div>
-
-    <!-- Action area -->
+      <section v-for="group in groups" :key="group.system" class="mb-3 last:mb-0">
+        <div class="mb-1.5 flex items-center gap-2">
+          <span class="h-1.5 w-1.5 rounded-full bg-[var(--app-primary)]" />
+          <h2 class="text-[11px] font-bold tracking-wide text-[var(--app-muted)]">{{ group.label }}</h2>
+          <span class="text-[10px] text-[var(--app-muted-2)]">{{ group.items.length }}</span>
+        </div>
+        <div class="overflow-hidden rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-raised)]/70">
+          <article v-for="(notification, index) in group.items" :key="notification.id" class="relative px-3 py-2.5" :class="index ? 'border-t border-[var(--app-border)]' : ''">
+            <div class="absolute inset-y-0 left-0 w-0.5" :class="priorityConfig[notification.priority]?.bar || priorityConfig.pending.bar" />
+            <div class="flex items-start justify-between gap-2 pl-1">
+              <div class="min-w-0">
+                <div class="mb-0.5 flex items-center gap-1.5">
+                  <span class="truncate text-[13px] font-semibold text-[var(--app-fg-strong)]">{{ notification.title }}</span>
+                  <span class="shrink-0 rounded px-1 py-px text-[9px] font-semibold" :class="notification.priority === 'pending' ? 'bg-[var(--app-danger)]/10 text-[var(--app-danger)]' : 'bg-[var(--app-muted-2)]/10 text-[var(--app-muted-2)]'">{{ priorityConfig[notification.priority]?.label || '待處理' }}</span>
+                </div>
+                <p class="truncate text-[11px] text-[var(--app-muted)]">{{ detailFor(notification, group.system) }}</p>
+              </div>
+              <time class="shrink-0 pt-0.5 text-[10px] text-[var(--app-muted-2)]">{{ timeFor(notification) }}</time>
+            </div>
+          </article>
+        </div>
+      </section>
+    </main>
     <div class="shrink-0 border-t border-[var(--app-border)] px-4 pt-3 pb-3">
-      <button
-        type="button"
-        class="w-full h-10 rounded-lg bg-[var(--app-primary)] text-[13px] font-bold text-white transition-colors hover:bg-[var(--app-primary-strong)] flex items-center justify-center gap-1.5"
-        @click="openMainWindow"
-      >
+      <button type="button" class="flex h-10 w-full items-center justify-center gap-1.5 rounded-lg bg-[var(--app-primary)] text-[13px] font-bold text-white transition-colors hover:bg-[var(--app-primary-strong)]" @click="openMainWindow">
         開啟主程式
         <span class="i-mdi-open-in-new text-[13px]" />
       </button>
     </div>
   </div>
-
-  <!-- Empty state — intentional monitoring indicator -->
   <div v-else class="h-screen w-screen flex items-center justify-center bg-[var(--app-surface)]">
-    <div class="text-center">
-      <div class="relative mx-auto mb-3 h-2 w-2">
-        <div class="absolute inset-0 rounded-full bg-[var(--app-primary)] animate-ping opacity-60" />
-        <div class="relative h-2 w-2 rounded-full bg-[var(--app-primary)]" />
-      </div>
-      <p class="text-[var(--app-muted-2)] text-[13px]">等待警示中…</p>
-    </div>
+    <div class="text-center"><div class="relative mx-auto mb-3 h-2 w-2"><div class="absolute inset-0 rounded-full bg-[var(--app-primary)] animate-ping opacity-60" /><div class="relative h-2 w-2 rounded-full bg-[var(--app-primary)]" /></div><p class="text-[var(--app-muted-2)] text-[13px]">等待警示中…</p></div>
   </div>
 </template>

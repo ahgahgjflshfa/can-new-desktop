@@ -46,33 +46,17 @@ pub fn run() {
                     api.prevent_close();
 
                     let state = window.state::<PendingNotificationState>();
-                    let displayed = state
-                        .displayed
-                        .lock()
-                        .ok()
-                        .and_then(|mut displayed| displayed.take());
-                    let mut notification_id = String::new();
-                    let mut revision = 0;
-                    if let Some((id, rev)) = displayed {
-                        if let Ok(mut pending) = state.notification.lock() {
-                            if pending
-                                .as_ref()
-                                .map(|n| n.id == id && n.revision == rev)
-                                .unwrap_or(false)
-                            {
-                                *pending = None;
-                                notification_id = id;
-                                revision = rev;
-                            }
-                        }
-                    }
+                    let displayed_revision = state.take_popup_revision().ok().flatten();
+                    // Closing is a popup lifecycle event, not a dismissal. Keep
+                    // the batch available for the pending-notification fallback.
+                    // The revision is the complete close identity; never choose
+                    // one item from a multi-notification batch.
+                    let revision = displayed_revision.unwrap_or(0);
 
                     let payload = PopupClosedPayload {
-                        notification_id: if notification_id.is_empty() {
-                            None
-                        } else {
-                            Some(notification_id)
-                        },
+                        // Retained for the frontend migration contract. A batch
+                        // close intentionally has no singular notification id.
+                        notification_id: None,
                         revision,
                     };
                     if let Some(main_window) = window.app_handle().get_webview_window("main") {

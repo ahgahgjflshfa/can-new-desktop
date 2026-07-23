@@ -75,6 +75,7 @@ describe('notificationStore', () => {
     testStore.notifications = []
     testStore.canRuntimeActive = true
     testStore.canTasksSnapshot = []
+    vi.mocked(invoke).mockReset()
     vi.clearAllMocks()
     vi.mocked(completeChargeTask).mockReset()
     vi.mocked(fetchChargeTasks).mockReset()
@@ -536,6 +537,123 @@ describe('notificationStore', () => {
       teardownNotificationRuntime()
     })
 
+    test('managed dirty rerun does not replay a popup closed before its result', async () => {
+      const store = useNotificationStore()
+      const authStore = useAuthStore()
+      authStore.lmaSession = { token: 'lma-token', user: { name: 'LMA', stationId: 'A1', sectionId: null, role: 'staff' } }
+      const runtimeAuthStore = { getSystemSession: vi.fn(() => ({ token: 'lma-token' })) }
+      vi.mocked(isTauriRuntime).mockReturnValue(true)
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' })
+      let resolveShow!: () => void
+      const showResult = new Promise<void>(resolve => { resolveShow = resolve })
+      vi.mocked(invoke).mockImplementation(async (command: string) => {
+        if (command !== 'show_alert_popup') return undefined
+        await showResult
+        return { revision: 1 }
+      })
+      await initializeNotificationRuntime({ notificationStore: store, authStore: runtimeAuthStore, onOpenSystem: vi.fn() })
+      store.setLmaRuntimeState(true)
+      const first = createMockNotification({ id: 'close-before-result' })
+      store.handleNewNotifications([first])
+      await vi.waitFor(() => expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === 'show_alert_popup')).toHaveLength(1))
+
+      // Repeat the identical poll snapshot so the dirty replay exercises the
+      // original same-batch-key dedupe path rather than a changed batch.
+      store.handleNewNotifications([first])
+      store.handlePopupClosedEvent(first.id, 1)
+      const replayCompletion = store.runReminderCycle()
+      resolveShow()
+      await replayCompletion
+
+      expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === 'show_alert_popup')).toHaveLength(1)
+      expect(store.isPopupVisible).toBe(false)
+    })
+
+    test('managed global reminder is invalidated when a new quiet epoch is armed', async () => {
+      vi.useFakeTimers()
+      try {
+        const store = useNotificationStore()
+        const authStore = useAuthStore()
+        authStore.lmaSession = { token: 'lma-token', user: { name: 'LMA', stationId: 'A1', sectionId: null, role: 'staff' } }
+        const runtimeAuthStore = { getSystemSession: vi.fn(() => ({ token: 'lma-token' })) }
+        vi.mocked(isTauriRuntime).mockReturnValue(true)
+        Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' })
+        let resolveShow!: () => void
+        const showResult = new Promise<void>(resolve => { resolveShow = resolve })
+        vi.mocked(invoke).mockImplementation(async (command: string) => {
+          if (command === 'show_alert_popup') {
+            await showResult
+            return { revision: 10 }
+          }
+          return undefined
+        })
+        await initializeNotificationRuntime({ notificationStore: store, authStore: runtimeAuthStore, onOpenSystem: vi.fn() })
+        store.setLmaRuntimeState(true)
+        store.setCanRuntimeState(true)
+        store.notifications = [
+          { ...createMockNotification({ id: 'active-lma', metadata: { system: 'lma' } }), status: 'pending' },
+          { ...createMockNotification({ id: 'inactive-can', metadata: { system: 'can' } }), status: 'pending' },
+        ]
+
+        store.handlePopupOpened()
+        await vi.advanceTimersByTimeAsync(60_000)
+        await vi.waitFor(() => expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === 'show_alert_popup')).toHaveLength(1))
+
+        store.handlePopupOpened()
+        resolveShow()
+        await Promise.resolve(); await Promise.resolve(); await Promise.resolve()
+
+        expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === 'show_alert_popup')).toHaveLength(1)
+        expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === 'hide_alert_popup')).toHaveLength(1)
+        expect(store.isPopupVisible).toBe(false)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    test('old deadline intent is discarded by a later quiet epoch during managed replay', async () => {
+      vi.useFakeTimers()
+      try {
+        const store = useNotificationStore()
+        const authStore = useAuthStore()
+        authStore.lmaSession = { token: 'lma-token', user: { name: 'LMA', stationId: 'A1', sectionId: null, role: 'staff' } }
+        const runtimeAuthStore = { getSystemSession: vi.fn(() => ({ token: 'lma-token' })) }
+        vi.mocked(isTauriRuntime).mockReturnValue(true)
+        Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' })
+        let resolveShow!: () => void
+        const showResult = new Promise<void>(resolve => { resolveShow = resolve })
+        vi.mocked(invoke).mockImplementation(async (command: string) => {
+          if (command === 'show_alert_popup') {
+            await showResult
+            return { revision: 20 }
+          }
+          return undefined
+        })
+        await initializeNotificationRuntime({ notificationStore: store, authStore: runtimeAuthStore, onOpenSystem: vi.fn() })
+        store.setLmaRuntimeState(true)
+        store.setCanRuntimeState(true)
+        store.notifications = [
+          { ...createMockNotification({ id: 'active-lma', metadata: { system: 'lma' } }), status: 'pending' },
+          { ...createMockNotification({ id: 'inactive-can', metadata: { system: 'can' } }), status: 'pending' },
+        ]
+
+        store.handleNewNotifications([createMockNotification({ id: 'initial-show' })], 'lma')
+        await vi.waitFor(() => expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === 'show_alert_popup')).toHaveLength(1))
+        store.handlePopupOpened()
+        await vi.advanceTimersByTimeAsync(60_000)
+        // The old deadline has set its intent, but the managed cycle is still
+        // waiting for the initial native show result.
+        store.handlePopupOpened()
+        resolveShow()
+        await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve()
+
+        expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === 'show_alert_popup')).toHaveLength(1)
+        expect(store.isPopupVisible).toBe(false)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
     test('adds new notifications to the list', () => {
       const store = useNotificationStore()
       const notification = createMockNotification()
@@ -585,6 +703,7 @@ describe('notificationStore', () => {
       await Promise.resolve()
 
       expect(invoke).toHaveBeenCalledWith('show_alert_popup', {
+        notifications: expect.arrayContaining([expect.objectContaining({ id: 'focus-test' })]),
         notification: expect.objectContaining({ id: 'focus-test' }),
       })
       expect(store.isPopupVisible).toBe(true)
@@ -592,20 +711,154 @@ describe('notificationStore', () => {
 
     test('shows popup for cross-system notifications even when the app is focused', async () => {
       vi.mocked(isTauriRuntime).mockReturnValue(true)
+      vi.mocked(invoke).mockResolvedValue({ revision: 1 })
       vi.spyOn(document, 'hasFocus').mockReturnValue(true)
       useSystemStore().switchView('can')
       const store = useNotificationStore()
 
       store.handleNewNotifications([createMockNotification({ id: 'cross-system-lma' })])
-      await Promise.resolve()
+      await Promise.resolve(); await Promise.resolve()
 
       expect(invoke).toHaveBeenCalledWith('show_alert_popup', {
+        notifications: expect.arrayContaining([expect.objectContaining({
+          id: 'cross-system-lma',
+          metadata: expect.objectContaining({ system: 'lma' }),
+        })]),
         notification: expect.objectContaining({
           id: 'cross-system-lma',
           metadata: expect.objectContaining({ system: 'lma' }),
         }),
       })
       expect(store.isPopupVisible).toBe(true)
+    })
+
+    test('global reminder popup suppresses active-tab tasks when the window is hidden', async () => {
+      vi.useFakeTimers()
+      try {
+        vi.mocked(isTauriRuntime).mockReturnValue(true)
+        vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+        Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' })
+        const systemStore = useSystemStore()
+        systemStore.switchView('lma')
+        const store = useNotificationStore()
+        store.setLmaRuntimeState(true)
+        store.setCanRuntimeState(true)
+
+        store.handleNewNotifications([createMockNotification({ id: 'active-lma', createdAt: '2026-01-01T00:00:00.000Z', metadata: { system: 'lma' } })], 'lma')
+        store.handleNewNotifications([createMockNotification({ id: 'inactive-can', createdAt: '2026-01-02T00:00:00.000Z', priority: 'replied', metadata: { system: 'can' } })], 'can')
+        await Promise.resolve()
+        vi.mocked(invoke).mockResolvedValue({ revision: 1 })
+        vi.mocked(invoke).mockClear()
+
+        store.handlePopupOpened()
+        await vi.advanceTimersByTimeAsync(60_000)
+
+        const popupCalls = vi.mocked(invoke).mock.calls.filter(([command]) => command === 'show_alert_popup')
+        const popupCall = popupCalls[popupCalls.length - 1]
+        expect(popupCall?.[1]).toMatchObject({
+          notifications: [expect.objectContaining({ id: 'can:inactive-can' })],
+        })
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    test('unchanged polling snapshots do not re-invoke a visible popup', async () => {
+      vi.mocked(isTauriRuntime).mockReturnValue(true)
+      vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+      const store = useNotificationStore()
+      const notification = createMockNotification({ id: 'stable-popup', metadata: { system: 'lma' } })
+      store.handleNewNotifications([notification], 'lma')
+      await Promise.resolve(); await Promise.resolve()
+      const firstCount = vi.mocked(invoke).mock.calls.filter(([command]) => command === 'show_alert_popup').length
+
+      store.handleNewNotifications([notification], 'lma')
+      await Promise.resolve(); await Promise.resolve()
+
+      expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === 'show_alert_popup')).toHaveLength(firstCount)
+    })
+
+    test('poll and blur cycles stay quiet until the shared reminder deadline', async () => {
+      vi.useFakeTimers()
+      try {
+        vi.mocked(isTauriRuntime).mockReturnValue(true)
+        vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+        const store = useNotificationStore()
+        store.handleNewNotifications([createMockNotification({ id: 'quiet-period', body: 'changed during quiet' })], 'lma')
+        store.handleNewNotifications([createMockNotification({ id: 'quiet-new' })], 'lma')
+        await Promise.resolve(); await Promise.resolve()
+        store.handlePopupOpened()
+        const beforeQuietCycles = vi.mocked(invoke).mock.calls.filter(([command]) => command === 'show_alert_popup').length
+
+        store.handleNewNotifications([createMockNotification({ id: 'quiet-period', body: 'changed during quiet' })], 'lma')
+        store.handleNewNotifications([createMockNotification({ id: 'quiet-new' })], 'lma')
+        window.dispatchEvent(new Event('blur'))
+        await vi.advanceTimersByTimeAsync(30_000)
+
+        expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === 'show_alert_popup')).toHaveLength(beforeQuietCycles)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    test('in-flight ordinary popup is hidden when open-main arms the quiet period', async () => {
+      vi.useFakeTimers()
+      try {
+        vi.mocked(isTauriRuntime).mockReturnValue(true)
+        vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+        let resolveShow!: () => void
+        const showResult = new Promise<void>(resolve => { resolveShow = resolve })
+        vi.mocked(invoke).mockImplementation(async (command: string) => {
+          if (command === 'show_alert_popup') {
+            await showResult
+            return { revision: 1 }
+          }
+          return undefined
+        })
+        const store = useNotificationStore()
+        store.handleNewNotifications([createMockNotification({ id: 'queued-before-open' })], 'lma')
+        await vi.waitFor(() => expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === 'show_alert_popup')).toHaveLength(1))
+        store.handlePopupOpened()
+        store.handleNewNotifications([createMockNotification({ id: 'queued-after-open' })], 'lma')
+        window.dispatchEvent(new Event('blur'))
+        resolveShow()
+        await Promise.resolve(); await Promise.resolve()
+        expect(store.isPopupVisible).toBe(false)
+        expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === 'show_alert_popup')).toHaveLength(1)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    test('changed popup content re-emits a new snapshot', async () => {
+      vi.mocked(isTauriRuntime).mockReturnValue(true)
+      vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+      const store = useNotificationStore()
+      store.handleNewNotifications([createMockNotification({ id: 'changed-content', body: 'before' })], 'lma')
+      await Promise.resolve(); await Promise.resolve()
+      store.handleNewNotifications([createMockNotification({ id: 'changed-content', body: 'after' })], 'lma')
+      await Promise.resolve(); await Promise.resolve()
+
+      const popupCalls = vi.mocked(invoke).mock.calls.filter(([command]) => command === 'show_alert_popup')
+      expect(popupCalls).toHaveLength(2)
+      expect((popupCalls[1]?.[1] as { notifications: Array<{ body: string }> }).notifications[0]?.body).toBe('after')
+    })
+
+    test('aggregate immediate popup includes pending and replied unresolved tasks', async () => {
+      vi.mocked(isTauriRuntime).mockReturnValue(true)
+      vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+      const store = useNotificationStore()
+      store.handleNewNotifications([
+        createMockNotification({ id: 'aggregate-pending', createdAt: '2026-01-01T00:00:00.000Z', priority: 'pending', metadata: { system: 'lma' } }),
+        createMockNotification({ id: 'aggregate-replied', createdAt: '2026-01-02T00:00:00.000Z', priority: 'replied', metadata: { system: 'lma' } }),
+      ], 'lma')
+      await Promise.resolve(); await Promise.resolve()
+
+      const popupCalls = vi.mocked(invoke).mock.calls.filter(([command]) => command === 'show_alert_popup')
+      const popupCall = popupCalls[popupCalls.length - 1]
+      expect((popupCall?.[1] as { notifications?: Array<{ id: string }> })?.notifications?.map(item => item.id)).toEqual([
+        'aggregate-pending', 'aggregate-replied',
+      ])
     })
 
     test('keeps popup hidden for same-system notifications while the app is focused', async () => {
@@ -657,6 +910,29 @@ describe('notificationStore', () => {
       expect(invoke).toHaveBeenCalledWith('clear_alert_popup_system', {
         system: 'lma', expectedPrincipal: 'principal-a', expectedRevision: 41,
       })
+    })
+
+    test('does not adopt a popup identity when native close precedes command return', async () => {
+      vi.mocked(isTauriRuntime).mockReturnValue(true)
+      vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+      let resolveShow!: (value: { revision: number }) => void
+      vi.mocked(invoke).mockImplementation((command: string) => command === 'show_alert_popup'
+        ? new Promise(resolve => { resolveShow = resolve })
+        : Promise.resolve())
+      const store = useNotificationStore()
+      store.setLmaPrincipal('principal-a')
+      const notification = createMockNotification({ id: 'close-race', metadata: { system: 'lma', principal: 'principal-a' } })
+      store.handleNewNotifications([notification])
+      await Promise.resolve()
+
+      store.handlePopupClosedEvent(null, 41)
+      resolveShow({ revision: 41 })
+      await Promise.resolve()
+      await Promise.resolve()
+
+      expect(store.popupClosedRevision).toBe(41)
+      expect(store.isPopupVisible).toBe(false)
+      expect(store.lmaPopupIdentity).toBeNull()
     })
 
     test('queues subsequent notifications', () => {
@@ -727,15 +1003,22 @@ describe('notificationStore', () => {
 
     test('shows a popup notification for new unresolved CAN tasks', async () => {
       vi.mocked(isTauriRuntime).mockReturnValue(true)
+      vi.mocked(invoke).mockResolvedValue({ revision: 1 })
       vi.spyOn(document, 'hasFocus').mockReturnValue(false)
       const store = useNotificationStore()
 
       store.handleCanTasks([createCanTask()])
-      await Promise.resolve()
+      await Promise.resolve(); await Promise.resolve()
 
       expect(store.currentNotification?.id).toBe('can:123')
       expect(store.currentNotification?.metadata?.system).toBe('can')
       expect(invoke).toHaveBeenCalledWith('show_alert_popup', {
+        notifications: expect.arrayContaining([expect.objectContaining({
+          id: 'can:123',
+          title: 'Q 潔淨立馬清任務',
+          category: 'Q 潔淨立馬清',
+          metadata: expect.objectContaining({ system: 'can', serialNumber: 123 }),
+        })]),
         notification: expect.objectContaining({
           id: 'can:123',
           title: 'Q 潔淨立馬清任務',

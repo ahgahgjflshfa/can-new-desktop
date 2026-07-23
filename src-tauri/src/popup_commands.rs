@@ -1,14 +1,16 @@
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 use crate::constants::{POPUP_HEIGHT, POPUP_LABEL, POPUP_WIDTH};
-use crate::ipc_types::{DismissPayload, NotificationPayload, PopupClearedPayload};
+use crate::ipc_types::{
+    DismissPayload, NotificationPayload, PopupClearedPayload, PopupNotificationBatch,
+};
 use crate::runtime_log;
 use crate::state::PendingNotificationState;
 
 const LOG_SOURCE: &str = "popup";
 
-fn same_popup_identity(notification: &NotificationPayload, id: &str, revision: u64) -> bool {
-    notification.id == id && notification.revision == revision
+fn same_popup_batch(batch: &PopupNotificationBatch, revision: u64) -> bool {
+    batch.revision == revision
 }
 
 fn matches_lma_clear(notification: &NotificationPayload, principal: &str, revision: u64) -> bool {
@@ -28,37 +30,46 @@ fn matches_lma_clear(notification: &NotificationPayload, principal: &str, revisi
 }
 
 fn revise_notification(
-    mut notification: NotificationPayload,
+    mut notifications: Vec<NotificationPayload>,
     revision: &mut u64,
-) -> Result<NotificationPayload, String> {
+) -> Result<PopupNotificationBatch, String> {
     *revision = revision.saturating_add(1);
     if *revision == 0 {
         return Err("popup revision overflowed".to_string());
     }
-    notification.revision = *revision;
-    Ok(notification)
+    for notification in &mut notifications {
+        notification.revision = *revision;
+    }
+    Ok(PopupNotificationBatch {
+        notifications,
+        revision: *revision,
+    })
 }
 
 #[tauri::command]
 pub async fn show_alert_popup(
     app: tauri::AppHandle,
-    notification: NotificationPayload,
+    notifications: Vec<NotificationPayload>,
     state: tauri::State<'_, PendingNotificationState>,
-) -> Result<NotificationPayload, String> {
+) -> Result<PopupNotificationBatch, String> {
     runtime_log::info(
         LOG_SOURCE,
         format!(
-            "show_alert_popup called with notification id {}",
-            notification.id
+            "show_alert_popup called with {} notifications",
+            notifications.len()
         )
         .as_str(),
     );
-    let mut revised_notification = notification;
+    let revised_batch;
     {
         let mut pending = state.notification.lock().map_err(|e| e.to_string())?;
         let mut revision = state.revision.lock().map_err(|e| e.to_string())?;
-        revised_notification = revise_notification(revised_notification, &mut revision)?;
-        *pending = Some(revised_notification.clone());
+        revised_batch = revise_notification(notifications, &mut revision)?;
+        *pending = Some(revised_batch.clone());
+        // The popup may be closed before its frontend acknowledgement arrives.
+        // Track the batch currently represented by the native window so that
+        // close cannot report the previous acknowledged revision in that gap.
+        state.mark_popup_revision(revised_batch.revision)?;
         runtime_log::info(
             LOG_SOURCE,
             "Stored notification in PendingNotificationState",
@@ -119,7 +130,7 @@ pub async fn show_alert_popup(
     })?;
 
     window
-        .emit("show-notification", &revised_notification)
+        .emit("show-notification", &revised_batch)
         .map_err(|e| {
             runtime_log::error(
                 LOG_SOURCE,
@@ -130,7 +141,7 @@ pub async fn show_alert_popup(
 
     runtime_log::info(LOG_SOURCE, "Popup notification event emitted successfully");
 
-    Ok(revised_notification)
+    Ok(revised_batch)
 }
 
 #[tauri::command]
@@ -158,31 +169,33 @@ pub fn clear_alert_popup_system(
 ) -> Result<(), String> {
     let mut pending = state.notification.lock().map_err(|e| e.to_string())?;
     let revision = pending.as_ref().map(|item| item.revision).unwrap_or(0);
-    let pending_principal = pending
-        .as_ref()
-        .and_then(|item| item.metadata.as_ref())
-        .and_then(|metadata| metadata.get("principal"))
-        .and_then(|value| value.as_str())
-        .unwrap_or("");
-    let pending_system = pending
-        .as_ref()
-        .and_then(|item| item.metadata.as_ref())
-        .and_then(|metadata| metadata.get("system"))
-        .and_then(|value| value.as_str())
-        .unwrap_or("lma");
     let identity_matches = pending
         .as_ref()
-        .map(|item| matches_lma_clear(item, &expected_principal, expected_revision))
+        .map(|item| {
+            item.notifications
+                .iter()
+                .any(|n| matches_lma_clear(n, &expected_principal, expected_revision))
+        })
         .unwrap_or(false);
-    if pending_system == system
-        && identity_matches
-        && pending_principal == expected_principal
-        && revision == expected_revision
-    {
-        *pending = None;
+    if system == "lma" && identity_matches && revision == expected_revision {
+        if let Some(batch) = pending.as_mut() {
+            batch.notifications.retain(|notification| {
+                notification
+                    .metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.get("system"))
+                    .and_then(|value| value.as_str())
+                    != Some("lma")
+            });
+            if batch.notifications.is_empty() {
+                *pending = None;
+            }
+        }
         if let Some(popup) = app.get_webview_window(POPUP_LABEL) {
             let _ = popup.emit("popup-cleared", PopupClearedPayload { system, revision });
-            let _ = popup.hide();
+            if pending.is_none() {
+                let _ = popup.hide();
+            }
         }
     }
     Ok(())
@@ -191,16 +204,15 @@ pub fn clear_alert_popup_system(
 #[tauri::command]
 pub fn ack_popup_displayed(
     state: tauri::State<'_, PendingNotificationState>,
-    notification_id: String,
     revision: u64,
 ) -> Result<(), String> {
     let pending = state.notification.lock().map_err(|e| e.to_string())?;
     if pending
         .as_ref()
-        .map(|item| same_popup_identity(item, &notification_id, revision))
+        .map(|item| same_popup_batch(item, revision))
         .unwrap_or(false)
     {
-        *state.displayed.lock().map_err(|e| e.to_string())? = Some((notification_id, revision));
+        *state.displayed.lock().map_err(|e| e.to_string())? = Some(revision);
     }
     Ok(())
 }
@@ -231,14 +243,14 @@ mod tests {
     fn revised_payload_is_identical_for_pending_emit_and_return_and_increments() {
         let original = notification("same", 0, "principal");
         let mut revision = 0;
-        let first = revise_notification(original.clone(), &mut revision).unwrap();
-        let second = revise_notification(original, &mut revision).unwrap();
+        let first = revise_notification(vec![original.clone()], &mut revision).unwrap();
+        let second = revise_notification(vec![original], &mut revision).unwrap();
         let pending = first.clone();
         let emitted = first.clone();
         let returned = first;
-        assert_eq!(pending.id, emitted.id);
+        assert_eq!(pending.notifications[0].id, emitted.notifications[0].id);
         assert_eq!(pending.revision, emitted.revision);
-        assert_eq!(pending.id, returned.id);
+        assert_eq!(pending.notifications[0].id, returned.notifications[0].id);
         assert_eq!(pending.revision, returned.revision);
         assert_eq!(second.revision, pending.revision + 1);
     }
@@ -254,9 +266,55 @@ mod tests {
     #[test]
     fn stale_ack_cannot_ack_newer_pending() {
         let b = notification("b", 2, "principal-b");
-        assert!(!same_popup_identity(&b, "a", 1));
-        assert!(!same_popup_identity(&b, "b", 1));
-        assert!(same_popup_identity(&b, "b", 2));
+        let batch = PopupNotificationBatch {
+            notifications: vec![b],
+            revision: 2,
+        };
+        assert!(!same_popup_batch(&batch, 1));
+        assert!(same_popup_batch(&batch, 2));
+    }
+
+    #[test]
+    fn acknowledgement_is_for_the_whole_batch_revision() {
+        let batch = PopupNotificationBatch {
+            notifications: vec![notification("a", 7, "p"), notification("b", 7, "p")],
+            revision: 7,
+        };
+        assert!(same_popup_batch(&batch, 7));
+        assert!(!same_popup_batch(&batch, 6));
+    }
+
+    #[test]
+    fn close_uses_new_pending_revision_before_frontend_ack() {
+        let first = PopupNotificationBatch {
+            notifications: vec![notification("a", 1, "p")],
+            revision: 1,
+        };
+        let second = PopupNotificationBatch {
+            notifications: vec![notification("b", 2, "p"), notification("c", 2, "p")],
+            revision: 2,
+        };
+        let state = PendingNotificationState {
+            notification: std::sync::Mutex::new(Some(first)),
+            revision: std::sync::Mutex::new(2),
+            displayed: std::sync::Mutex::new(Some(1)),
+        };
+        // Revision 1 was acknowledged, then revision 2 replaced it. The
+        // replacement happens before its frontend ack in the race window.
+        *state.notification.lock().unwrap() = Some(second.clone());
+        state.mark_popup_revision(second.revision).unwrap();
+
+        let close_revision = state.take_popup_revision().unwrap();
+        assert_eq!(close_revision, Some(2));
+        assert_eq!(
+            state
+                .notification
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map(|b| b.revision),
+            Some(2)
+        );
     }
 }
 
@@ -281,8 +339,11 @@ pub async fn emit_dismiss_notification(
         if dismiss_all {
             *pending = None;
         } else if let Some(ref id) = notification_id {
-            if pending.as_ref().map(|n| n.id == *id).unwrap_or(false) {
-                *pending = None;
+            if let Some(batch) = pending.as_mut() {
+                batch.notifications.retain(|n| n.id != *id);
+                if batch.notifications.is_empty() {
+                    *pending = None;
+                }
             }
         }
     }
@@ -315,7 +376,7 @@ pub async fn emit_dismiss_notification(
 #[tauri::command]
 pub fn get_pending_notification(
     state: tauri::State<'_, PendingNotificationState>,
-) -> Result<Option<NotificationPayload>, String> {
+) -> Result<Option<PopupNotificationBatch>, String> {
     let pending = state.notification.lock().map_err(|e| e.to_string())?;
     runtime_log::info(
         LOG_SOURCE,
