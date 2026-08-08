@@ -332,7 +332,7 @@ describe('notificationStore', () => {
     test('polling 403 cleanup is charge-only and stale old-credential 403 preserves new charge session', async () => {
       const store = useNotificationStore(); const authStore = useAuthStore()
       authStore.lmaSession = { token: 'lma', user: { name: 'LMA', stationId: 'A', sectionId: null, role: 'staff' } }
-      authStore.canSession = { token: 'can', user: { name: 'CAN', station: 'C', topic: 'cleaning' } }
+      authStore.canSession = { token: 'can', user: { account: 'CAN', name: 'CAN', station: 'C', accessScope: 'station', region: null, topic: 'cleaning', system: 'can' } }
       authStore.chargeSession = { token: 'old', user: { name: 'Charge', account: 'c', station: 'S1', system: 'charge' } }
       store.chargePollingEnabled = true
       vi.mocked(fetchChargeTasks).mockRejectedValueOnce({ status: 403, message: 'forbidden' })
@@ -390,7 +390,7 @@ describe('notificationStore', () => {
     test('real CAN completion fences deferred poll and performs one authoritative refresh', async () => {
       const store = useNotificationStore()
       const authStore = useAuthStore()
-      authStore.canSession = { token: 'can-token', user: { name: 'CAN', station: 'C1', topic: 'cleaning' } }
+      authStore.canSession = { token: 'can-token', user: { account: 'CAN', name: 'CAN', station: 'C1', accessScope: 'station', region: null, topic: 'cleaning', system: 'can' } }
       store.canPollingEnabled = true
       store.canPollingIntervalMs = 60_000
       const task = {
@@ -1090,7 +1090,7 @@ describe('notificationStore', () => {
     test('routes LMA notification actions to LMA token while CAN is active', async () => {
       const authStore = useAuthStore()
       authStore.lmaSession = { token: 'lma-token', user: { name: 'LMA', stationId: 'A1', sectionId: null, role: 'staff' } }
-      authStore.canSession = { token: 'can-token', user: { name: 'CAN', station: 'C1', topic: 'general' } }
+      authStore.canSession = { token: 'can-token', user: { account: 'CAN', name: 'CAN', station: 'C1', accessScope: 'station', region: null, topic: 'general', system: 'can' } }
       authStore.switchSystem('can')
       vi.mocked(replyTask).mockResolvedValue('replied')
       vi.mocked(completeTask).mockResolvedValue('completed')
@@ -1106,7 +1106,7 @@ describe('notificationStore', () => {
 
     test('blocks LMA notification actions before IPC when the LMA session is missing', async () => {
       const authStore = useAuthStore()
-      authStore.canSession = { token: 'can-token', user: { name: 'CAN', station: 'C1', topic: 'general' } }
+      authStore.canSession = { token: 'can-token', user: { account: 'CAN', name: 'CAN', station: 'C1', accessScope: 'station', region: null, topic: 'general', system: 'can' } }
       authStore.switchSystem('can')
       const store = useNotificationStore()
       store.handleNewNotifications([createMockNotification({ id: '42', metadata: { system: 'lma', taskId: 42 } })])

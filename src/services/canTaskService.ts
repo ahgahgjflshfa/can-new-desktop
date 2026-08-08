@@ -12,23 +12,18 @@ function requireCanToken(token: string): string {
   return token
 }
 
-export async function fetchCanTasks(token: string, stationCode: string): Promise<CanTask[]> {
-  logAppEvent('info', LOG_SOURCE, 'Fetching CAN tasks', { stationCode })
+export async function fetchCanTasks(token: string): Promise<CanTask[]> {
+  logAppEvent('info', LOG_SOURCE, 'Fetching CAN tasks')
 
   try {
     const tasks = await invoke<CanTask[]>('can_fetch_tasks', {
       token: requireCanToken(token),
-      stationCode,
     })
 
-    logAppEvent('info', LOG_SOURCE, 'CAN tasks fetched successfully', {
-      count: tasks.length,
-      stationCode,
-    })
-
+    logAppEvent('info', LOG_SOURCE, 'CAN tasks fetched successfully', { count: tasks.length })
     return tasks
   } catch (error) {
-    logAppEvent('error', LOG_SOURCE, 'Failed to fetch CAN tasks', { stationCode, error })
+    logAppEvent('error', LOG_SOURCE, 'Failed to fetch CAN tasks', { error })
     throw error
   }
 }

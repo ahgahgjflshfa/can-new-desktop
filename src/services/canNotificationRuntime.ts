@@ -5,7 +5,6 @@ export interface CanRuntimeConfig {
   enabled: boolean
   intervalMs: number
   token: string | null
-  station: string | null
 }
 
 export interface CanRuntimeCallbacks {
@@ -18,7 +17,7 @@ export interface CanRuntimeCallbacks {
 }
 
 export class CanNotificationController {
-  private config: CanRuntimeConfig = { enabled: false, intervalMs: 10000, token: null, station: null }
+  private config: CanRuntimeConfig = { enabled: false, intervalMs: 10000, token: null }
   private timer: ReturnType<typeof setTimeout> | null = null
   private inFlight = false
   private queued = false
@@ -57,7 +56,7 @@ export class CanNotificationController {
     this.generation++
     this.clearTimer()
     this.queued = false
-    this.config = { ...this.config, enabled: false, token: null, station: null }
+    this.config = { ...this.config, enabled: false, token: null }
     this.callbacks.onStopped?.()
   }
 
@@ -70,7 +69,7 @@ export class CanNotificationController {
   }
 
   private isActive(): boolean {
-    return this.config.enabled && Boolean(this.config.token && this.config.station)
+    return this.config.enabled && Boolean(this.config.token)
   }
 
   private schedule(delayMs: number): void {
@@ -84,12 +83,12 @@ export class CanNotificationController {
   }
 
   private async poll(requestGeneration: number): Promise<void> {
-    const { token, station } = this.config
-    if (!token || !station || !this.isActive()) return
+    const { token } = this.config
+    if (!token || !this.isActive()) return
     this.inFlight = true
     this.callbacks.onRequestStarted?.()
     try {
-      const tasks = await fetchCanTasks(token, station)
+      const tasks = await fetchCanTasks(token)
       if (requestGeneration === this.generation && this.isActive()) this.callbacks.onSnapshot(tasks)
     } catch (error) {
       if (requestGeneration === this.generation && this.isActive()) {

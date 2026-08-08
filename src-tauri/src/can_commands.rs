@@ -14,29 +14,25 @@ pub struct CanLoginRequest {
 #[derive(Deserialize)]
 struct CanLoginApiData {
     access_token: String,
-    account: Option<String>,
+    account: String,
     station: Option<String>,
+    #[serde(rename = "accessScope")]
+    access_scope: String,
+    region: Option<String>,
     topic: Option<String>,
-}
-
-fn parse_jwt_sub(token: &str) -> Option<String> {
-    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-    let parts: Vec<&str> = token.split('.').collect();
-    if parts.len() < 2 {
-        return None;
-    }
-    let payload = parts[1];
-    let decoded = URL_SAFE_NO_PAD.decode(payload).ok()?;
-    let json: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
-    json.get("sub")?.as_str().map(|s| s.to_string())
+    system: String,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CanUser {
+    account: String,
     name: String,
-    station: String,
-    topic: String,
+    station: Option<String>,
+    access_scope: String,
+    region: Option<String>,
+    topic: Option<String>,
+    system: String,
 }
 
 #[derive(Serialize)]
@@ -92,7 +88,7 @@ pub async fn can_login(payload: CanLoginRequest) -> Result<CanLoginResponse, Str
     };
 
     let response = client
-        .post(build_can_api_url("/api/auth/login"))
+        .post(build_can_api_url("/auth/login"))
         .json(&body)
         .send()
         .await
@@ -138,46 +134,43 @@ pub async fn can_login(payload: CanLoginRequest) -> Result<CanLoginResponse, Str
         },
     };
 
-    let station = data
-        .station
-        .or_else(|| parse_jwt_sub(&data.access_token))
-        .unwrap_or_else(|| payload.account.clone());
-    let topic = data.topic.unwrap_or_else(|| format!("can_{}", station));
-    let account = data.account.unwrap_or_else(|| payload.account.clone());
+    if data.system != "can" && data.system != "admin" {
+        return Err("此帳號不可使用 Q 潔淨立馬清".to_string());
+    }
+    if !matches!(data.access_scope.as_str(), "station" | "region" | "global") {
+        return Err("CAN 登入回傳的權限範圍無效".to_string());
+    }
+    if let Some(region) = &data.region {
+        if !matches!(region.as_str(), "north" | "central" | "south") {
+            return Err("CAN 登入回傳的區段無效".to_string());
+        }
+    }
 
     runtime_log::info(
         LOG_SOURCE,
-        format!(
-            "CAN login succeeded for account '{}' (station='{}', topic='{}')",
-            account, station, topic
-        )
-        .as_str(),
+        format!("CAN login succeeded for account '{}'", data.account).as_str(),
     );
 
     Ok(CanLoginResponse {
         token: data.access_token,
         user: CanUser {
-            name: account,
-            station,
-            topic,
+            name: data.account.clone(),
+            account: data.account,
+            station: data.station,
+            access_scope: data.access_scope,
+            region: data.region,
+            topic: data.topic,
+            system: data.system,
         },
     })
 }
 
 #[tauri::command]
-pub async fn can_fetch_tasks(
-    token: String,
-    station_code: String,
-) -> Result<Vec<CanTaskItem>, String> {
-    runtime_log::info(
-        LOG_SOURCE,
-        format!("Fetching CAN tasks for station '{}'", station_code).as_str(),
-    );
+pub async fn can_fetch_tasks(token: String) -> Result<Vec<CanTaskItem>, String> {
+    runtime_log::info(LOG_SOURCE, "Fetching CAN tasks");
     let client = build_can_api_client()?;
     let response = client
-        .get(build_can_api_url(
-            format!("/api/task/station/{}", station_code).as_str(),
-        ))
+        .get(build_can_api_url("/task"))
         .bearer_auth(token)
         .send()
         .await
@@ -276,7 +269,7 @@ pub async fn can_complete_task(
 
     let response = client
         .patch(build_can_api_url(
-            format!("/api/task/{}", serial_number).as_str(),
+            format!("/task/{}", serial_number).as_str(),
         ))
         .bearer_auth(token)
         .json(&body)

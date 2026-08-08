@@ -1,7 +1,15 @@
+export type CanAccessScope = 'station' | 'region' | 'global'
+export type CanRegion = 'north' | 'central' | 'south'
+export type CanSystem = 'can' | 'admin'
+
 export interface CanAuthUser {
+  account: string
   name: string
-  station: string
-  topic: string
+  station: string | null
+  accessScope: CanAccessScope
+  region: CanRegion | null
+  topic: string | null
+  system: CanSystem
 }
 
 export interface CanLoginResponse {

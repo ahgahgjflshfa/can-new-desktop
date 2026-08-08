@@ -52,7 +52,7 @@ describe('CanTaskView auth boundary', () => {
     if (includeCan) {
       authStore.canSession = {
         token: 'can-token',
-        user: { name: 'CAN', station: 'C1', topic: 'general' },
+        user: { account: 'CAN', name: 'CAN', station: 'C1', accessScope: 'station', region: null, topic: 'general', system: 'can' },
       }
     }
     authStore.currentSystem = 'lma'

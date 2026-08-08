@@ -149,7 +149,7 @@ pub async fn charge_login(
 ) -> Result<ChargeLoginResponse, ChargeHttpError> {
     let client = build_can_api_client().map_err(|message| http_error(0, message))?;
     let response = client
-        .post(build_can_api_url("/api/auth/login"))
+        .post(build_can_api_url("/auth/login"))
         .json(&serde_json::json!({ "account": payload.account, "password": payload.password }))
         .send()
         .await
@@ -190,7 +190,7 @@ pub async fn charge_fetch_tasks(
     }
     let client = build_can_api_client().map_err(|message| http_error(0, message))?;
     let response = client
-        .get(build_can_api_url("/api/charge/task"))
+        .get(build_can_api_url("/charge/task"))
         .bearer_auth(token)
         .send()
         .await
@@ -232,7 +232,7 @@ pub async fn charge_complete_task(
     let client = build_can_api_client().map_err(|message| http_error(0, message))?;
     let response = client
         .patch(build_can_api_url(&format!(
-            "/api/charge/task/{}",
+            "/charge/task/{}",
             serial_number
         )))
         .bearer_auth(token)

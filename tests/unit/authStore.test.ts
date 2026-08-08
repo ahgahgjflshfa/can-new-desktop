@@ -60,7 +60,7 @@ describe('authStore', () => {
   }
 
   function mockCanUser(name = 'CAN User'): CanAuthUser {
-    return { name, station: 'C1', topic: 'general' }
+    return { account: name, name, station: 'C1', accessScope: 'station', region: null, topic: 'general', system: 'can' }
   }
 
   function mockChargeUser(name = 'Charge User'): ChargeAuthUser {
@@ -94,6 +94,43 @@ describe('authStore', () => {
     expect(store.displayName).toBe('Alice')
     expect(store.token).toBe('abc')
     expect(localStorage.setItem).toHaveBeenCalled()
+  })
+
+  test('stores a regional CAN login without synthesizing a station', async () => {
+    const regionalUser: CanAuthUser = {
+      account: 'North',
+      name: 'North',
+      station: null,
+      accessScope: 'region',
+      region: 'north',
+      topic: 'can_region_north',
+      system: 'can',
+    }
+    canLoginWithPasswordMock.mockResolvedValue({ token: 'regional-token', user: regionalUser })
+    const store = useAuthStore()
+
+    await store.login('can', 'North', 'secret')
+
+    expect(store.getSystemSession('can')).toEqual({ token: 'regional-token', user: regionalUser })
+    expect(localStorage.setItem).toHaveBeenCalledWith('tauri-app:auth:can', JSON.stringify({ token: 'regional-token', user: regionalUser }))
+  })
+
+  test('stores a global CAN login with a nullable station', async () => {
+    const globalUser: CanAuthUser = {
+      account: 'Admin',
+      name: 'Admin',
+      station: null,
+      accessScope: 'global',
+      region: null,
+      topic: null,
+      system: 'admin',
+    }
+    canLoginWithPasswordMock.mockResolvedValue({ token: 'global-token', user: globalUser })
+    const store = useAuthStore()
+
+    await store.login('can', 'Admin', 'secret')
+
+    expect(store.getSystemSession('can')).toEqual({ token: 'global-token', user: globalUser })
   })
 
   test('reports lma authenticated immediately after login', async () => {

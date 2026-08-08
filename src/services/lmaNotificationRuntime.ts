@@ -179,13 +179,9 @@ let canRuntimeReconcile: (() => void) | null = null
 let canRuntimeWatchStop: WatchStopHandle | null = null
 let chargeRuntimeController: ChargeNotificationController | null = null
 let chargeRuntimeWatchStop: WatchStopHandle | null = null
-let previousCanCredentials = { token: null as string | null, station: null as string | null }
+let previousCanToken: string | null = null
 let previousChargeCredentials = { token: null as string | null, station: null as string | null }
 
-function getCanStation(authStore: { getSystemSession: (system: Exclude<SystemType, 'charge'>) => { token: string; user?: unknown } | null }): string | null {
-  const user = authStore.getSystemSession('can')?.user
-  return user && typeof user === 'object' && 'station' in user && typeof user.station === 'string' ? user.station : null
-}
 function getChargeStation(authStore: { getSystemSession: (system: Exclude<SystemType, 'charge'>) => { token: string; user?: unknown } | null }): string | null {
   const getSession = authStore.getSystemSession as unknown as (system: SystemType) => { token: string; user?: unknown } | null
   const user = getSession('charge')?.user
@@ -219,7 +215,7 @@ export function teardownNotificationRuntime(): void {
   chargeRuntimeWatchStop?.()
   chargeRuntimeWatchStop = null
   canRuntimeReconcile = null
-  previousCanCredentials = { token: null, station: null }
+  previousCanToken = null
   previousChargeCredentials = { token: null, station: null }
   runtimeReconcile = null
   for (const unlisten of runtimeUnlisteners.splice(0)) unlisten()
@@ -341,21 +337,19 @@ export function initializeNotificationRuntime(options: {
     )
     const canReconcile = () => {
       const session = authStore.getSystemSession('can')
-      const station = getCanStation(authStore)
-      if (previousCanCredentials.token !== (session?.token ?? null) || previousCanCredentials.station !== station) {
+      if (previousCanToken !== (session?.token ?? null)) {
         notificationStore.clearCanSnapshot?.()
-        previousCanCredentials = { token: session?.token ?? null, station }
+        previousCanToken = session?.token ?? null
       }
       canRuntimeController?.reconcile({
         enabled: notificationStore.canPollingEnabled ?? false,
         intervalMs: notificationStore.canPollingIntervalMs ?? 10000,
         token: session?.token ?? null,
-        station,
       })
     }
     canRuntimeReconcile = canReconcile
     canRuntimeWatchStop = watch(
-      () => [authStore.getSystemSession('can')?.token ?? null, getCanStation(authStore), notificationStore.canPollingEnabled ?? false, notificationStore.canPollingIntervalMs ?? 10000],
+      () => [authStore.getSystemSession('can')?.token ?? null, notificationStore.canPollingEnabled ?? false, notificationStore.canPollingIntervalMs ?? 10000],
       canReconcile,
       { immediate: true },
     )

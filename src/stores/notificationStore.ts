@@ -991,17 +991,12 @@ export const useNotificationStore = defineStore('notifications', {
     async completeCanTask(serialNumber: number, resolutionType: number) {
       const authStore = useAuthStore()
       const token = authStore.getSystemSession('can')?.token
-      const station = authStore.getSystemSession('can')?.user
-      const stationCode = station && 'station' in station ? station.station : null
-      if (!token || !stationCode) throw new Error('缺少 Q 潔淨立馬清登入驗證資訊，請重新登入')
+      if (!token) throw new Error('缺少 Q 潔淨立馬清登入驗證資訊，請重新登入')
       const controller = getCanNotificationController()
       const generation = controller?.getGeneration()
       await completeCanTask(token, serialNumber, true, resolutionType)
       const currentSession = authStore.getSystemSession('can')
-      const currentUser = currentSession?.user
-      const currentStation = currentUser && 'station' in currentUser ? currentUser.station : null
-      if (currentSession?.token !== token || currentStation !== stationCode ||
-        (controller && controller.getGeneration() !== generation)) return
+      if (currentSession?.token !== token || (controller && controller.getGeneration() !== generation)) return
       const task = this.canTasksSnapshot.find(item => item.serialNumber === serialNumber)
       if (task) {
         task.isDone = true

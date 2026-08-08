@@ -7,7 +7,7 @@ import { fetchNotifications } from '@/services/notificationDataSource'
 vi.mock('@/services/canTaskService', () => ({ fetchCanTasks: vi.fn() }))
 vi.mock('@/services/notificationDataSource', () => ({ fetchNotifications: vi.fn() }))
 
-const config = { enabled: true, intervalMs: 1000, token: 'can-token', station: 'C1' }
+const config = { enabled: true, intervalMs: 1000, token: 'can-token' }
 const task = (serialNumber: number) => ({ serialNumber, station: 'C1', trashBin: 'bin', isDone: false, cleanAt: null, informTime: 1, resolutionType: 0, visitorID: null, isDisable: false, createdAt: '2026-01-01', updatedAt: '2026-01-01' })
 
 describe('CanNotificationController', () => {
@@ -19,7 +19,7 @@ describe('CanNotificationController', () => {
     const controller = new CanNotificationController({ onSnapshot: vi.fn(), onError: vi.fn() })
     controller.reconcile(config)
     await vi.advanceTimersByTimeAsync(0)
-    expect(fetchCanTasks).toHaveBeenCalledWith('can-token', 'C1')
+    expect(fetchCanTasks).toHaveBeenCalledWith('can-token')
     await vi.advanceTimersByTimeAsync(1000)
     expect(fetchCanTasks).toHaveBeenCalledTimes(2)
   })
@@ -37,14 +37,14 @@ describe('CanNotificationController', () => {
     expect(fetchCanTasks).toHaveBeenCalledTimes(2)
   })
 
-  test('fences token/station changes and teardown results', async () => {
+  test('fences token changes and teardown results', async () => {
     let resolve!: (value: any[]) => void
     vi.mocked(fetchCanTasks).mockReturnValueOnce(new Promise(r => { resolve = r }))
     const onSnapshot = vi.fn()
     const controller = new CanNotificationController({ onSnapshot, onError: vi.fn() })
     controller.reconcile(config)
     await vi.advanceTimersByTimeAsync(0)
-    controller.reconcile({ ...config, token: 'new-token', station: 'C2' })
+    controller.reconcile({ ...config, token: 'new-token' })
     controller.teardown()
     resolve([task(9)])
     await vi.runAllTicks()
