@@ -38,6 +38,10 @@
     "windows": {
       "wix": {
         "language": "zh-TW"
+      },
+      "nsis": {
+        "installMode": "perMachine",
+        "languages": ["TradChinese"]
       }
     }
   }
