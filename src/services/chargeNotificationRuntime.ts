@@ -1,6 +1,15 @@
 import { fetchChargeTasks, isChargeForbidden } from '@/services/chargeTaskService'
 import type { ChargeTask } from '@/types/charge'
 
+function formatChargeError(error: unknown): string {
+  if (error instanceof Error) return error.message
+  if (typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string') return error.message
+  try {
+    return JSON.stringify(error)
+  } catch {
+    return String(error)
+  }
+}
 export interface ChargeRuntimeConfig {
   enabled: boolean
   intervalMs: number
@@ -112,7 +121,7 @@ export class ChargeNotificationController {
         this.callbacks.onStopped?.(transitionedContext)
         this.callbacks.onForbidden?.(transitionedContext)
       }
-      else this.callbacks.onError(error instanceof Error ? error : new Error(String(error)), context)
+      else this.callbacks.onError(new Error(formatChargeError(error)), context)
     } finally {
       this.inFlight = false
       this.callbacks.onRequestFinished?.(this.context())

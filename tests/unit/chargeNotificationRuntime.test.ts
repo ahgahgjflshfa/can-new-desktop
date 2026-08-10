@@ -7,7 +7,7 @@ vi.mock('@/services/chargeTaskService', () => ({
   isChargeForbidden: (error: unknown) => typeof error === 'object' && error !== null && (error as { status?: number }).status === 403,
 }))
 
-const task = { serialNumber: 1, deviceCode: 'D1', station: 'S1', status: 'pending', faultDescription: 'fault', faultType: 'x', resolutionType: 0, isDisable: false, createdAt: 'now', updatedAt: 'now' }
+const task = { serialNumber: 1, deviceCode: 'D1', station: 'S1', isDone: false, cleanAt: null, informTime: 1, isDisable: false, createdAt: 'now', updatedAt: 'now' }
 
 describe('ChargeNotificationController', () => {
   beforeEach(() => { vi.useFakeTimers(); vi.mocked(fetchChargeTasks).mockReset() })

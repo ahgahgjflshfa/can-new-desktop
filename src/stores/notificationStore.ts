@@ -12,7 +12,7 @@ import type { ChargeTask } from '@/types/charge'
 import type { ChargeRuntimeContext } from '@/services/chargeNotificationRuntime'
 import { useAuthStore } from '@/stores/authStore'
 import { completeCanTask } from '@/services/canTaskService'
-import { completeChargeTask, isChargeForbidden } from '@/services/chargeTaskService'
+import { updateChargeTask, isChargeForbidden } from '@/services/chargeTaskService'
 import { getCanNotificationController, getChargeNotificationController, getLmaNotificationController, getLmaPrincipal, isLmaNotificationRuntimeManaged, reconcileCanNotificationRuntime, reconcileLmaNotificationRuntime, triggerCanNotificationRuntime, triggerChargeNotificationRuntime } from '@/services/lmaNotificationRuntime'
 import type { SystemType } from '@/types/system'
 
@@ -37,13 +37,12 @@ function getCanNotificationId(serialNumber: number | string): string {
 function getChargeNotificationId(serialNumber: number | string): string { return `charge:${serialNumber}` }
 
 function convertChargeTaskToNotification(task: ChargeTask): EmergencyNotification | null {
-  const status = task.status.trim().toLowerCase()
-  if (status !== 'pending' && status !== 'processing') return null
+  if (task.isDone) return null
   return {
     id: getChargeNotificationId(task.serialNumber),
     title: '無線充故障任務',
-    body: `${task.deviceCode} ${task.faultDescription}`,
-    priority: status === 'processing' ? 'replied' : 'pending',
+    body: `${task.station} ${task.deviceCode}`,
+    priority: 'pending',
     category: '無線充故障',
     createdAt: task.createdAt,
     receivedAt: new Date().toISOString(),
@@ -353,7 +352,8 @@ export const useNotificationStore = defineStore('notifications', {
     },
     canActiveTasks: state => state.canTasksSnapshot.filter(task => !task.isDone),
     chargePollingIntervalSeconds: state => state.chargePollingIntervalMs / 1000,
-    chargeActiveTasks: state => state.chargeTasksSnapshot.filter(task => ['pending', 'processing'].includes(task.status.trim().toLowerCase())),
+    chargeActiveTasks: state => state.chargeTasksSnapshot.filter(task => !task.isDone),
+    chargeCompletedTasks: state => state.chargeTasksSnapshot.filter(task => task.isDone),
   },
 
   actions: {
@@ -509,7 +509,6 @@ export const useNotificationStore = defineStore('notifications', {
       // Opening the main window starts a quiet period. Polling, focus, and
       // blur notifications must not compete with the user's active work until
       // the single shared reminder deadline fires.
-      if (globalPopupReminderArmed && !isGlobalReminder) return
 
       let candidates = isGlobalReminder
         ? this.getUnresolvedNotifications().filter(notification => {
@@ -517,10 +516,7 @@ export const useNotificationStore = defineStore('notifications', {
           return system !== null && (system === 'lma' ? this.lmaRuntimeActive : system === 'can' ? this.canRuntimeActive : this.chargeRuntimeActive)
         })
         : this.getReminderCandidates()
-      if (isGlobalReminder) {
-        const activeSystem = useSystemStore().currentView
-        candidates = candidates.filter(notification => getNotificationSystem(notification) !== activeSystem)
-      }
+      if (globalPopupReminderArmed && !isGlobalReminder) return
       if (isGlobalReminder) globalReminderIntentEpoch = null
       const target = this.getReminderTarget(candidates)
       if (!target) {
@@ -547,6 +543,13 @@ export const useNotificationStore = defineStore('notifications', {
       }
     },
 
+    armGlobalPopupReminder() {
+      globalPopupReminderEpoch++
+      globalReminderIntentEpoch = null
+      globalPopupReminderArmed = true
+      this.scheduleGlobalPopupReminder()
+    },
+
     scheduleGlobalPopupReminder() {
       clearGlobalPopupReminder()
       globalPopupReminderTimeoutId = setTimeout(() => {
@@ -562,10 +565,7 @@ export const useNotificationStore = defineStore('notifications', {
       this.isPopupVisible = false
       lastPopupBatchKey = null
       popupBatchInFlightKey = null
-      globalPopupReminderEpoch++
-      globalReminderIntentEpoch = null
-      globalPopupReminderArmed = true
-      this.scheduleGlobalPopupReminder()
+      this.armGlobalPopupReminder()
     },
 
     async runReminderCycle() {
@@ -674,6 +674,7 @@ export const useNotificationStore = defineStore('notifications', {
         if (this.currentNotification?.id === notificationId) this.currentNotification = null
       }
       this.isPopupVisible = false
+      this.armGlobalPopupReminder()
       if (revision > 0 && this.lmaPopupIdentity && this.lmaPopupIdentity.revision <= revision) {
         this.lmaPopupIdentity = null
       }
@@ -853,15 +854,9 @@ export const useNotificationStore = defineStore('notifications', {
 
     setChargeSnapshot(tasks: ChargeTask[], _context?: ChargeRuntimeContext) {
       const station = this.chargeStation()
-      const sanitized = tasks.filter(task => {
-        const status = task.status.trim().toLowerCase()
-        if (status === 'done' || status === 'cancelled') return false
-        if (status !== 'pending' && status !== 'processing') {
-          console.warn('Ignoring unknown charge task status:', task.status)
-          return false
-        }
-        return Boolean(station) && task.station.trim() === station
-      }).map(task => ({ ...task, station: task.station.trim(), status: task.status.trim().toLowerCase() }))
+      const sanitized = tasks
+        .filter(task => Boolean(station) && task.station.trim() === station)
+        .map(task => ({ ...task, station: task.station.trim() }))
       this.chargeTasksSnapshot = sanitized
       this.chargeRequestInFlight = false
       this.chargePollingLastError = null
@@ -938,35 +933,34 @@ export const useNotificationStore = defineStore('notifications', {
       return user && 'station' in user && typeof user.station === 'string' ? user.station.trim() || null : null
     },
 
-    async completeChargeTask(serialNumber: number) {
+    async completeChargeTask(serialNumber: number, isDone = true) {
       if (this.chargeCompletionInFlight) throw new Error('無線充故障任務正在處理中')
-      const task = this.chargeTasksSnapshot.find(item => item.serialNumber === serialNumber && ['pending', 'processing'].includes(item.status.trim().toLowerCase()))
+      const task = this.chargeTasksSnapshot.find(item => item.serialNumber === serialNumber && item.isDone !== isDone)
       const station = this.chargeStation()
       const token = useAuthStore().getSystemSession('charge')?.token
       if (!task || !station || !token || task.station.trim() !== station) throw new Error('無效的無線充故障任務')
       const controller = getChargeNotificationController()
       if (!controller?.isUsable()) throw new Error('無線充故障輪詢尚未建立')
-      const generation = controller?.getGeneration()
+      const generation = controller.getGeneration()
       this.chargeCompletionInFlight = true
       try {
-        await completeChargeTask(token, station, serialNumber)
+        await updateChargeTask(token, station, serialNumber, isDone)
         const current = useAuthStore().getSystemSession('charge')
-        const currentStation = this.chargeStation()
-        if (current?.token !== token || currentStation !== station || controller !== getChargeNotificationController() || controller?.getGeneration() !== generation) return
-        this.chargeTasksSnapshot = this.chargeTasksSnapshot.filter(item => item.serialNumber !== serialNumber)
-        this.resolveNotificationFromPolling(getChargeNotificationId(serialNumber), 'completed')
+        if (current?.token !== token || this.chargeStation() !== station || controller !== getChargeNotificationController() || controller.getGeneration() !== generation) return
+        const currentTask = this.chargeTasksSnapshot.find(item => item.serialNumber === serialNumber)
+        if (currentTask) currentTask.isDone = isDone
+        if (isDone) this.resolveNotificationFromPolling(getChargeNotificationId(serialNumber), 'completed')
         this.saveToStorage()
         await this.runReminderCycle()
-        controller?.invalidate()
+        controller.invalidate()
         await triggerChargeNotificationRuntime()
       } catch (error) {
         const current = useAuthStore().getSystemSession('charge')
-        const currentStation = this.chargeStation()
-        const currentController = getChargeNotificationController()
-        const currentContext = current?.token === token && currentStation === station && currentController === controller && currentController?.getGeneration() === generation
+        const currentContext = current?.token === token && this.chargeStation() === station &&
+          controller === getChargeNotificationController() && controller.getGeneration() === generation
         if (isChargeForbidden(error) && currentContext) {
-          controller?.invalidate()
-          controller?.reconcile({ enabled: false, intervalMs: this.chargePollingIntervalMs, token: null, station: null })
+          controller.invalidate()
+          controller.reconcile({ enabled: false, intervalMs: this.chargePollingIntervalMs, token: null, station: null })
           this.clearChargeState()
           useAuthStore().clearSession('charge')
         }
@@ -1008,7 +1002,7 @@ export const useNotificationStore = defineStore('notifications', {
       await triggerCanNotificationRuntime()
     },
 
-    async showNotification(notificationId: string, popupCandidates?: NotificationState[], inactiveSystemsOnly = false) {
+    async showNotification(notificationId: string, popupCandidates?: NotificationState[], isReminderDeadline = false) {
       const notification = this.notifications.find(n => n.id === notificationId)
       if (!notification) return
       const system = getNotificationSystem(notification)
@@ -1028,7 +1022,7 @@ export const useNotificationStore = defineStore('notifications', {
         return
       }
 
-      if (isMainWindowActive() && isNotificationForCurrentView(notification)) {
+      if (!isReminderDeadline && isMainWindowActive() && isNotificationForCurrentView(notification)) {
         this.isPopupVisible = false
         return
       }
@@ -1045,7 +1039,7 @@ export const useNotificationStore = defineStore('notifications', {
             .map(item => getNotificationSystem(item))
             .filter((system): system is NotificationSystem => system !== null)
         )
-        const popupNotifications = (inactiveSystemsOnly
+        const popupNotifications = (isReminderDeadline
           ? this.getUnresolvedNotifications().filter(item => candidateSystems.has(getNotificationSystem(item) as NotificationSystem))
           : this.getUnresolvedNotifications())
           .filter(item => {
@@ -1059,7 +1053,7 @@ export const useNotificationStore = defineStore('notifications', {
             metadata: item.metadata,
           }))
         const popupBatchKey = JSON.stringify({
-          inactiveSystemsOnly,
+          isReminderDeadline,
           notifications: popupPayloads.map(item => ({
             id: item.id,
             title: item.title,
@@ -1078,12 +1072,12 @@ export const useNotificationStore = defineStore('notifications', {
         // `notification` is retained as a compatibility alias for older popup
         // builds; the backend uses the complete ordered `notifications` list.
         const shown = await serializePopupOperation(async () => {
-          if (popupOperationEpoch !== globalPopupReminderEpoch || (!inactiveSystemsOnly && globalPopupReminderArmed)) return POPUP_SUPPRESSED
+          if (popupOperationEpoch !== globalPopupReminderEpoch || (!isReminderDeadline && globalPopupReminderArmed)) return POPUP_SUPPRESSED
           const result = await invoke<{ revision: number }>('show_alert_popup', {
             notifications: popupPayloads,
             notification: popupPayloads[popupPayloads.length - 1],
           })
-          if (popupOperationEpoch !== globalPopupReminderEpoch || (!inactiveSystemsOnly && globalPopupReminderArmed)) {
+          if (popupOperationEpoch !== globalPopupReminderEpoch || (!isReminderDeadline && globalPopupReminderArmed)) {
             await invoke('hide_alert_popup')
             return POPUP_SUPPRESSED
           }

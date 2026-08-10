@@ -61,11 +61,15 @@ vi.mock('@/services/canTaskService', () => ({
   completeCanTask: vi.fn(),
 }))
 
-vi.mock('@/services/chargeTaskService', () => ({
-  completeChargeTask: vi.fn(),
-  fetchChargeTasks: vi.fn(),
-  isChargeForbidden: (error: unknown) => typeof error === 'object' && error !== null && (error as { status?: number }).status === 403,
-}))
+vi.mock('@/services/chargeTaskService', () => {
+  const completeChargeTask = vi.fn()
+  return {
+    completeChargeTask,
+    updateChargeTask: completeChargeTask,
+    fetchChargeTasks: vi.fn(),
+    isChargeForbidden: (error: unknown) => typeof error === 'object' && error !== null && (error as { status?: number }).status === 403,
+  }
+})
 
 describe('notificationStore', () => {
   beforeEach(() => {
@@ -258,17 +262,18 @@ describe('notificationStore', () => {
       const authStore = useAuthStore()
       authStore.chargeSession = { token: 't', user: { name: 'Charge', account: 'c', station: ' S1 ', system: 'charge' } }
       store.setChargeRuntimeState(true)
-      const base = { serialNumber: 1, deviceCode: 'D', station: 'S1', faultDescription: 'f', faultType: 'x', resolutionType: 0, isDisable: false, createdAt: 'now', updatedAt: 'now' }
+      const base = { serialNumber: 1, deviceCode: 'D', station: 'S1', cleanAt: null, informTime: 0, isDisable: false, createdAt: 'now', updatedAt: 'now' }
       store.setChargeSnapshot([
-        { ...base, serialNumber: 1, status: 'pending' },
-        { ...base, serialNumber: 2, status: ' PROCESSING ' },
-        { ...base, serialNumber: 3, status: 'done' },
-        { ...base, serialNumber: 4, status: 'cancelled' },
-        { ...base, serialNumber: 5, status: 'unknown' },
-        { ...base, serialNumber: 6, station: 'S2', status: 'pending' },
+        { ...base, serialNumber: 1, isDone: false },
+        { ...base, serialNumber: 2, isDone: false },
+        { ...base, serialNumber: 3, isDone: true },
+        { ...base, serialNumber: 4, isDone: true },
+        { ...base, serialNumber: 5, isDone: true },
+        { ...base, serialNumber: 6, station: 'S2', isDone: false },
       ] as ChargeTask[])
-      expect(store.chargeTasksSnapshot.map(t => t.serialNumber)).toEqual([1, 2])
-      expect(store.chargeTasksSnapshot[1]?.status).toBe('processing')
+      expect(store.chargeTasksSnapshot.map(t => t.serialNumber)).toEqual([1, 2, 3, 4, 5])
+      expect(store.chargeActiveTasks.map(t => t.serialNumber)).toEqual([1, 2])
+      expect(store.chargeCompletedTasks.map(t => t.serialNumber)).toEqual([3, 4, 5])
       expect(store.notifications.map(n => n.id)).toEqual(expect.arrayContaining(['charge:1', 'charge:2']))
       expect(store.notifications.map(n => n.id)).not.toEqual(expect.arrayContaining(['charge:3', 'charge:4', 'charge:5', 'charge:6']))
     })
@@ -732,7 +737,65 @@ describe('notificationStore', () => {
       expect(store.isPopupVisible).toBe(true)
     })
 
-    test('global reminder popup suppresses active-tab tasks when the window is hidden', async () => {
+    test('snoozes all systems after opening the main window before showing the full batch', async () => {
+      vi.useFakeTimers()
+      try {
+        vi.mocked(isTauriRuntime).mockReturnValue(true)
+        vi.mocked(invoke).mockResolvedValue({ revision: 1 })
+        vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+        useSystemStore().switchView('settings')
+        const store = useNotificationStore()
+        store.setLmaRuntimeState(true)
+        store.setCanRuntimeState(true)
+        store.setChargeRuntimeState(true)
+
+        store.handlePopupOpened()
+        store.handleNewNotifications([createMockNotification({ id: 'snoozed-lma', metadata: { system: 'lma' } })], 'lma')
+        store.handleNewNotifications([createMockNotification({ id: 'snoozed-can', metadata: { system: 'can', serialNumber: 123 } })], 'can')
+        store.handleNewNotifications([createMockNotification({ id: 'snoozed-charge', metadata: { system: 'charge', serialNumber: 456 } })], 'charge')
+        await vi.advanceTimersByTimeAsync(59_999)
+        expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === 'show_alert_popup')).toHaveLength(0)
+
+        await vi.advanceTimersByTimeAsync(1)
+        const popupCall = vi.mocked(invoke).mock.calls.find(([command]) => command === 'show_alert_popup')
+        expect((popupCall?.[1] as { notifications?: Array<{ metadata?: { system?: string } }> }).notifications).toEqual(expect.arrayContaining([
+          expect.objectContaining({ metadata: expect.objectContaining({ system: 'lma' }) }),
+          expect.objectContaining({ metadata: expect.objectContaining({ system: 'can' }) }),
+          expect.objectContaining({ metadata: expect.objectContaining({ system: 'charge' }) }),
+        ]))
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    test('snoozes a native popup close for 60 seconds before reminding again', async () => {
+      vi.useFakeTimers()
+      try {
+        vi.mocked(isTauriRuntime).mockReturnValue(true)
+        vi.mocked(invoke).mockResolvedValue({ revision: 1 })
+        vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+        useSystemStore().switchView('settings')
+        const store = useNotificationStore()
+
+        store.handleNewNotifications([createMockNotification({
+          id: 'closed-can',
+          metadata: { system: 'can', serialNumber: 456 },
+        })])
+        await vi.advanceTimersByTimeAsync(0)
+        expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === 'show_alert_popup')).toHaveLength(1)
+
+        store.handlePopupClosedEvent(null, 1)
+        await vi.advanceTimersByTimeAsync(59_999)
+        expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === 'show_alert_popup')).toHaveLength(1)
+
+        await vi.advanceTimersByTimeAsync(1)
+        expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === 'show_alert_popup')).toHaveLength(2)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    test('global reminder popup includes active-tab tasks when the window is hidden', async () => {
       vi.useFakeTimers()
       try {
         vi.mocked(isTauriRuntime).mockReturnValue(true)
@@ -756,7 +819,10 @@ describe('notificationStore', () => {
         const popupCalls = vi.mocked(invoke).mock.calls.filter(([command]) => command === 'show_alert_popup')
         const popupCall = popupCalls[popupCalls.length - 1]
         expect(popupCall?.[1]).toMatchObject({
-          notifications: [expect.objectContaining({ id: 'can:inactive-can' })],
+          notifications: expect.arrayContaining([
+            expect.objectContaining({ id: 'active-lma' }),
+            expect.objectContaining({ id: 'can:inactive-can' }),
+          ]),
         })
       } finally {
         vi.useRealTimers()
