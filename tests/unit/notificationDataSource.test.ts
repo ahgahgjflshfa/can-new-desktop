@@ -13,13 +13,21 @@ const AUTH_STORAGE_KEY = 'tauri-app:auth'
 describe('notificationDataSource', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    const storage = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => storage.set(key, value),
+      removeItem: (key: string) => storage.delete(key),
+    })
     localStorage.setItem(LMA_AUTH_STORAGE_KEY, JSON.stringify({ token: 'lma-test-token' }))
   })
 
   afterEach(() => {
     localStorage.removeItem(LMA_AUTH_STORAGE_KEY)
     localStorage.removeItem(AUTH_STORAGE_KEY)
+    vi.unstubAllGlobals()
   })
+
 
   test('does not map missing task timestamps to current time', async () => {
     invokeMock.mockResolvedValue([
