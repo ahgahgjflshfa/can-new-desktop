@@ -26,7 +26,7 @@ describe('App charge routing', () => {
     vi.useRealTimers()
   })
 
-  test('mounts authenticated charge settings without starting any task or polling lifecycle', () => {
+  test('mounts the authenticated Charge view without starting any task or polling lifecycle', () => {
     const authStore = useAuthStore()
     const systemStore = useSystemStore()
     const notificationStore = useNotificationStore()
@@ -60,11 +60,9 @@ describe('App charge routing', () => {
       },
     })
 
-    expect(wrapper.findComponent(SystemSettingsPanel).exists()).toBe(true)
+    expect(wrapper.findComponent(ChargeTaskView).exists()).toBe(true)
     expect(wrapper.text()).toContain('Charge User')
-    expect(wrapper.text()).toContain('charge-account')
     expect(wrapper.text()).toContain('S1')
-    expect(wrapper.text()).toContain('已建立')
     expect(pollingMutations.every(spy => spy.mock.calls.length === 0)).toBe(true)
     expect(intervalSpy).not.toHaveBeenCalled()
     expect(timeoutSpy).not.toHaveBeenCalled()
@@ -77,7 +75,7 @@ describe('App charge routing', () => {
 
   test('mounted ChargeTaskView is lifecycle-free and delegates refresh/completion to the store', async () => {
     const store = useNotificationStore()
-    store.chargeTasksSnapshot = [{ serialNumber: 42, deviceCode: 'D', station: 'S1', status: 'pending', faultDescription: 'fault', faultType: 'x', resolutionType: 0, isDisable: false, createdAt: 'now', updatedAt: 'now' }]
+    store.chargeTasksSnapshot = [{ serialNumber: 42, deviceCode: 'D', station: 'S1', isDone: false, cleanAt: null, informTime: 1, isDisable: false, createdAt: 'now', updatedAt: 'now' }]
     const refresh = vi.spyOn(store, 'refreshChargeTasks').mockResolvedValue(undefined)
     const complete = vi.spyOn(store, 'completeChargeTask').mockResolvedValue(undefined)
     const timerSpy = vi.spyOn(globalThis, 'setInterval')
@@ -85,21 +83,21 @@ describe('App charge routing', () => {
     const wrapper = mount(ChargeTaskView, { global: { plugins: [pinia], stubs: { SystemSettingsPanel: true } } })
     expect(timerSpy).not.toHaveBeenCalled()
     expect(fetchSpy).not.toHaveBeenCalled()
-    await wrapper.get('button').trigger('click')
-    await wrapper.findAll('button')[1]!.trigger('click')
+    await wrapper.findAll('button')[3]!.trigger('click')
+    await wrapper.findAll('button')[4]!.trigger('click')
     expect(refresh).toHaveBeenCalledTimes(1)
-    expect(complete).toHaveBeenCalledWith(42)
+    expect(complete).toHaveBeenCalledWith(42, true)
   })
 
   test('ChargeTaskView renders rejected action errors and charge settings dispatch interval while disabled', async () => {
     const store = useNotificationStore()
     store.chargePollingEnabled = false
-    store.chargeTasksSnapshot = [{ serialNumber: 43, deviceCode: 'D', station: 'S1', status: 'pending', faultDescription: 'fault', faultType: 'x', resolutionType: 0, isDisable: false, createdAt: 'now', updatedAt: 'now' }]
+    store.chargeTasksSnapshot = [{ serialNumber: 43, deviceCode: 'D', station: 'S1', isDone: false, cleanAt: null, informTime: 1, isDisable: false, createdAt: 'now', updatedAt: 'now' }]
     vi.spyOn(store, 'completeChargeTask').mockRejectedValue(new Error('completion failed'))
     vi.spyOn(store, 'refreshChargeTasks').mockRejectedValue(new Error('refresh failed'))
     const interval = vi.spyOn(store, 'setChargePollingInterval')
     const wrapper = mount(ChargeTaskView, { global: { plugins: [pinia], stubs: { SystemSettingsPanel: true } } })
-    await wrapper.findAll('button')[1]!.trigger('click')
+    await wrapper.findAll('button')[4]!.trigger('click')
     expect(wrapper.text()).toContain('completion failed')
     const settings = mount(SystemSettingsPanel, { props: { system: 'charge' }, global: { plugins: [pinia] } })
     expect(settings.find('input[type="checkbox"]').exists()).toBe(true)
