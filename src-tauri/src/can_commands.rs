@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::can_api_client::{build_can_api_client, build_can_api_url, CanApiEnvelope};
 use crate::runtime_log;
@@ -42,17 +42,33 @@ pub struct CanLoginResponse {
     user: CanUser,
 }
 
+fn deserialize_bool_or_number<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    match serde_json::Value::deserialize(deserializer)? {
+        serde_json::Value::Bool(value) => Ok(value),
+        serde_json::Value::Number(value) => Ok(value.as_i64().unwrap_or(0) != 0),
+        serde_json::Value::String(value) => Ok(matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "true" | "1" | "yes" | "y"
+        )),
+        _ => Err(serde::de::Error::custom("expected a boolean or 0/1")),
+    }
+}
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CanTaskItem {
     pub serial_number: i64,
     pub station: String,
     pub trash_bin: String,
+    #[serde(deserialize_with = "deserialize_bool_or_number")]
     pub is_done: bool,
     pub clean_at: Option<String>,
     pub inform_time: i64,
     pub resolution_type: i64,
     pub visitor_id: Option<String>,
+    #[serde(deserialize_with = "deserialize_bool_or_number")]
     pub is_disable: bool,
     pub created_at: String,
     pub updated_at: String,
@@ -370,7 +386,7 @@ pub async fn can_complete_task(
 
 #[cfg(test)]
 mod tests {
-    use super::CanCompleteTaskRequestBody;
+    use super::{CanCompleteTaskRequestBody, CanTaskItem};
     use serde_json::json;
 
     #[test]
@@ -389,5 +405,25 @@ mod tests {
                 "resolutionType": 1,
             })
         );
+    }
+
+    #[test]
+    fn deserializes_numeric_can_task_flags() {
+        let task: CanTaskItem = serde_json::from_value(json!({
+            "serialNumber": 1,
+            "station": "T01",
+            "trashBin": "T01-BIN-01",
+            "isDone": 0,
+            "cleanAt": null,
+            "informTime": 1,
+            "resolutionType": 0,
+            "visitorID": "seed-can-task",
+            "isDisable": 1,
+            "createdAt": "2026-08-08T08:00:55.000Z",
+            "updatedAt": "2026-08-08T08:00:55.000Z"
+        })).expect("deserialize CAN task with numeric flags");
+
+        assert!(!task.is_done);
+        assert!(task.is_disable);
     }
 }
