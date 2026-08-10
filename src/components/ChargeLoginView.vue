@@ -27,11 +27,6 @@ async function submitLogin() {
       <div class="mb-6 text-center">
         <div class="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-[var(--app-accent)] text-[var(--app-primary-strong)]"><span class="i-mdi-ev-station text-[1.3rem]" /></div>
         <h1 class="text-[1.4rem] font-black tracking-tight text-[var(--app-fg-strong)]">無線充故障</h1>
-        <p class="mt-1 text-[0.88rem] font-semibold text-[var(--app-muted)]">站務人員登入</p>
-      </div>
-      <div class="mb-5 flex gap-3 rounded-2xl bg-[var(--app-surface-2)] px-4 py-3 text-sm text-[var(--app-muted)]">
-        <span class="i-mdi-map-marker-radius mt-0.5 shrink-0 text-[var(--app-primary-strong)]" />
-        <p>登入後可查看此帳號所屬站點的無線充故障任務。</p>
       </div>
       <form class="flex flex-col gap-3.5" @submit.prevent="submitLogin">
         <label class="block"><span class="mb-1.5 block text-xs font-semibold tracking-wide text-[var(--app-muted)]">帳號</span><input id="charge-account" v-model="form.account" autocomplete="username" type="text" placeholder="請輸入帳號" class="m-0 h-12 w-full rounded-[0.95rem] border border-[var(--app-border)] bg-[var(--app-surface-2)] px-4 text-base text-[var(--app-fg)] placeholder:text-[var(--app-muted-2)] focus:border-[var(--app-primary)] focus:outline-none focus:ring-4 focus:ring-[var(--app-primary-surface)]" /></label>

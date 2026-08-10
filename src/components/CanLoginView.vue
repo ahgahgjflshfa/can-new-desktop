@@ -41,7 +41,6 @@ async function submitLogin() {
           <span class="i-mdi-broom text-[1.3rem]" />
         </div>
         <h1 class="text-[1.4rem] font-black tracking-tight text-[var(--app-fg-strong)]">Q 潔淨立馬清</h1>
-        <p class="mt-1 text-[0.88rem] font-semibold text-[var(--app-muted)]">Q 潔淨立馬清 登入</p>
       </div>
 
       <form class="flex flex-col gap-3.5" @submit.prevent="submitLogin">
