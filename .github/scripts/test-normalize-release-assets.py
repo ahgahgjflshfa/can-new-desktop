@@ -65,16 +65,13 @@ class AssetMappingTests(unittest.TestCase):
             (malformed, "limabangbangmang-1.2.0-linux-x86_64.deb")
         ])
 
-    def test_partial_retry_keeps_existing_target_and_cleans_old_asset(self):
-        old_asset = {"id": 42, "name": "_1.2.0_amd64.deb", "url": "old-url"}
-        target_asset = {"id": 84, "name": "limabangbangmang-1.2.0-linux-x86_64.deb", "url": "new-url"}
+    def test_retry_replaces_existing_target_with_new_build_asset(self):
+        new_build_asset = {"id": 42, "name": "_1.2.0_amd64.deb", "url": "new-url"}
+        target_asset = {"id": 84, "name": "limabangbangmang-1.2.0-linux-x86_64.deb", "url": "old-url"}
 
-        operations = normalize.matched_asset_operations([old_asset, target_asset], "1.2.0")
+        operations = normalize.matched_asset_operations([new_build_asset, target_asset], "1.2.0")
 
-        self.assertEqual(len(operations), 1)
-        self.assertIs(operations[0][0], old_asset)
-        self.assertEqual(operations[0][1], target_asset["name"])
-        self.assertFalse(operations[0][2], "existing target must skip upload but remain a cleanup operation")
+        self.assertEqual(operations, [(new_build_asset, target_asset["name"])])
 
     def test_rest_upload_url_percent_encodes_unicode_name(self):
         name = "limabangbangmang-1.2.0-linux-x86_64.deb"

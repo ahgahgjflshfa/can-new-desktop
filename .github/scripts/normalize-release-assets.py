@@ -128,22 +128,16 @@ def release_endpoint(repo: str, release_id: int) -> str:
     return f"repos/{repo}/releases/{release_id}"
 
 
-def matched_asset_operations(assets: list[dict], version: str) -> list[tuple[dict, str, bool]]:
-    """Return matched old assets and whether each still needs uploading."""
-    by_name = {asset["name"] for asset in assets}
+def matched_asset_operations(assets: list[dict], version: str) -> list[tuple[dict, str]]:
+    """Return newly built Tauri assets that must replace their canonical counterparts."""
     operations = []
     for asset in assets:
         old_name = asset["name"]
         if old_name.startswith(f"{PRODUCT}-"):
-            print(f"skip already canonical: {old_name}")
             continue
         new_name = asset_mapping(old_name, version)
-        if new_name is None:
-            continue
-        needs_upload = new_name not in by_name
-        if not needs_upload:
-            print(f"retain cleanup for {old_name}: {new_name} already exists")
-        operations.append((asset, new_name, needs_upload))
+        if new_name is not None:
+            operations.append((asset, new_name))
     return operations
 
 
@@ -182,20 +176,17 @@ def main() -> int:
 
     assets = release.get("assets", [])
     operations = matched_asset_operations(assets, version)
-    by_name = {asset["name"]: asset for asset in assets}
     malformed_cleanup = malformed_cleanup_operations(assets, version)
-    operation_targets = {new_name for _, new_name, _ in operations}
+    operation_targets = {new_name for _, new_name in operations}
     for asset, target in malformed_cleanup:
-        if target not in by_name and target not in operation_targets:
-            operations.append((asset, target, True))
+        if target not in operation_targets:
+            operations.append((asset, target))
             operation_targets.add(target)
-        else:
-            print(f"retain malformed cleanup for {asset['name']}: {target}")
 
-    if not operations and not malformed_cleanup:
+    if not operations:
         print("No Tauri default assets require normalization.")
         return 0
-    for asset, new_name, needs_upload in operations:
+    for asset, new_name in operations:
         label = asset_label(new_name, version)
         if label is None:
             raise RuntimeError(f"no label mapping for canonical asset {new_name}")
@@ -203,13 +194,12 @@ def main() -> int:
     if args.dry_run:
         return 0
 
-    # Everything is downloaded before any upload. Old asset IDs are deleted only
-    # after every replacement has uploaded and been observed in the release.
+    # Download every newly built asset first. Then delete all existing canonical
+    # counterparts, upload the replacements, verify them, and remove temporary
+    # Tauri-named assets. This intentionally replaces assets on a tag re-run.
     with tempfile.TemporaryDirectory(prefix="release-assets-") as directory:
         files: list[tuple[dict, str, str, Path]] = []
-        for asset, new_name, needs_upload in operations:
-            if not needs_upload:
-                continue
+        for asset, new_name in operations:
             destination = Path(directory) / new_name
             run_gh(
                 ["api", "-H", "Accept: application/octet-stream", asset["url"]],
@@ -220,27 +210,31 @@ def main() -> int:
                 raise RuntimeError(f"no label mapping for canonical asset {new_name}")
             files.append((asset, new_name, label, destination))
 
+        ensure_draft_before_cleanup(release)
+        replacement_targets = {new_name for _, new_name, _, _ in files}
+        for asset in assets:
+            if asset["name"] in replacement_targets:
+                run_gh(["api", "--method", "DELETE", asset["url"]])
+
         token = os.environ.get("GH_TOKEN")
-        if files:
-            if token is None:
-                raise RuntimeError("GH_TOKEN is required for REST asset upload")
-            for _, new_name, label, path in files:
-                upload_asset(token, args.repo, release["id"], new_name, label, path)
+        if token is None:
+            raise RuntimeError("GH_TOKEN is required for REST asset upload")
+        for _, new_name, label, path in files:
+            upload_asset(token, args.repo, release["id"], new_name, label, path)
 
         refreshed = json.loads(run_gh(["api", release_api_endpoint]))
         refreshed_by_name = {asset["name"]: asset for asset in refreshed.get("assets", [])}
-        required_targets = operation_targets | {target for _, target in malformed_cleanup}
         missing = [
             target
-            for target in required_targets
+            for target in replacement_targets
             if target not in refreshed_by_name
             or not uploaded_asset_matches(refreshed_by_name[target], target, asset_label(target, version) or "")
         ]
         if missing:
-            raise RuntimeError("upload verification failed; old assets were left untouched: " + ", ".join(missing))
+            raise RuntimeError("upload verification failed: " + ", ".join(missing))
         ensure_draft_before_cleanup(refreshed)
 
-        cleanup_assets = {asset["id"]: asset for asset, _, _ in operations}
+        cleanup_assets = {asset["id"]: asset for asset, _ in operations}
         cleanup_assets.update({asset["id"]: asset for asset, _ in malformed_cleanup})
         for asset in cleanup_assets.values():
             run_gh(["api", "--method", "DELETE", asset["url"]])
