@@ -13,7 +13,7 @@ const authStore = useAuthStore()
 const navItems = [
   { id: 'lma', label: '立碼幫幫忙', shortLabel: '立碼', icon: 'i-mdi-headset' },
   { id: 'can', label: 'Q 潔淨立馬清', shortLabel: 'Q潔', icon: 'i-mdi-broom' },
-  { id: 'charge', label: '無線充故障', shortLabel: '無線充故障', icon: 'i-mdi-ev-station' },
+  { id: 'charge', label: '無線充故障', shortLabel: '無線充故障', icon: 'i-mdi-lightning-bolt' },
   { id: 'settings', label: '偏好設定', shortLabel: '偏好', icon: 'i-mdi-cog-outline' },
 ] as const
 
