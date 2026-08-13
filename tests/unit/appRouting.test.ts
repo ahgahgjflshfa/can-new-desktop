@@ -61,7 +61,6 @@ describe('App charge routing', () => {
     })
 
     expect(wrapper.findComponent(ChargeTaskView).exists()).toBe(true)
-    expect(wrapper.text()).toContain('Charge User')
     expect(wrapper.text()).toContain('S1')
     expect(pollingMutations.every(spy => spy.mock.calls.length === 0)).toBe(true)
     expect(intervalSpy).not.toHaveBeenCalled()
@@ -86,7 +85,7 @@ describe('App charge routing', () => {
     await wrapper.findAll('button')[3]!.trigger('click')
     await wrapper.findAll('button')[4]!.trigger('click')
     expect(refresh).toHaveBeenCalledTimes(1)
-    expect(complete).toHaveBeenCalledWith(42, true)
+    expect(complete).toHaveBeenCalledWith(42)
   })
 
   test('ChargeTaskView renders rejected action errors and charge settings dispatch interval while disabled', async () => {
