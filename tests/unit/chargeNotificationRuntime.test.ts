@@ -24,6 +24,16 @@ describe('ChargeNotificationController', () => {
     expect(fetchChargeTasks).toHaveBeenCalledTimes(2)
   })
 
+  test('polls when a charge account has no station', async () => {
+    vi.mocked(fetchChargeTasks).mockResolvedValueOnce([task])
+    const onSnapshot = vi.fn()
+    const controller = new ChargeNotificationController({ onSnapshot, onError: vi.fn() })
+    controller.reconcile({ enabled: true, intervalMs: 1000, token: 't', station: null })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(fetchChargeTasks).toHaveBeenCalledWith('t', '')
+    expect(onSnapshot).toHaveBeenCalledWith([task], expect.objectContaining({ station: '' }))
+  })
+
   test('fences stale results after rotation and handles structured forbidden', async () => {
     let resolve!: (value: typeof task[]) => void
     vi.mocked(fetchChargeTasks).mockReturnValueOnce(new Promise(r => { resolve = r }))

@@ -2,7 +2,7 @@ import { acceptHMRUpdate, defineStore } from 'pinia'
 
 import { invoke } from '@tauri-apps/api/core'
 import { logAppEvent } from '@/services/appLogger'
-import { isTauriRuntime } from '@/tauri/window'
+import { isTauriRuntime, isWindowsPlatform } from '@/tauri/window'
 
 import { hideCurrentWindow } from './tauri/window'
 
@@ -18,7 +18,7 @@ async function syncMinimizeToTraySettingToBackend(enabled: boolean): Promise<voi
 }
 
 async function syncAutostartToBackend(enabled: boolean): Promise<void> {
-  if (!isTauriRuntime()) return
+  if (!isTauriRuntime() || !isWindowsPlatform()) return
 
   try {
     const autostart = await import('@tauri-apps/plugin-autostart')
@@ -43,8 +43,8 @@ export const useStore = defineStore('main', {
     version: versionString,
     isInitialized: false,
     currentView: 'notifications' as 'home' | 'settings' | 'notifications',
-    minimizeToTrayOnClose: false,
-    autoLaunchEnabled: true,
+    minimizeToTrayOnClose: isWindowsPlatform(),
+    autoLaunchEnabled: isWindowsPlatform(),
     cameraViewerUrl: '',
   }),
 

@@ -4,6 +4,10 @@ export function isTauriRuntime(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 }
 
+export function isWindowsPlatform(): boolean {
+  return typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent)
+}
+
 export async function minimizeCurrentWindow(): Promise<void> {
   if (!isTauriRuntime()) return
   await getCurrentWindow().minimize()

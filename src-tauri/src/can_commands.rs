@@ -15,6 +15,8 @@ pub struct CanLoginRequest {
 struct CanLoginApiData {
     access_token: String,
     account: String,
+    #[serde(rename = "fullName", alias = "full_name")]
+    full_name: Option<String>,
     station: Option<String>,
     #[serde(rename = "accessScope")]
     access_scope: String,
@@ -135,7 +137,7 @@ pub async fn can_login(payload: CanLoginRequest) -> Result<CanLoginResponse, Str
 
     let data: CanLoginApiData = match serde_json::from_str(&body_text) {
         Ok(direct) => direct,
-        Err(_) => match serde_json::from_str::<CanApiEnvelope<CanLoginApiData>>(&body_text) {
+        Err(direct_error) => match serde_json::from_str::<CanApiEnvelope<CanLoginApiData>>(&body_text) {
             Ok(envelope) => match envelope.data {
                 Some(d) => d,
                 None => {
@@ -144,7 +146,10 @@ pub async fn can_login(payload: CanLoginRequest) -> Result<CanLoginResponse, Str
                 }
             },
             Err(_) => {
-                runtime_log::error(LOG_SOURCE, "Failed to decode CAN login response");
+                runtime_log::error(
+                    LOG_SOURCE,
+                    format!("Failed to decode CAN login response: {}; body: {}", direct_error, body_text).as_str(),
+                );
                 return Err("Failed to decode CAN login response".to_string());
             }
         },
@@ -170,7 +175,10 @@ pub async fn can_login(payload: CanLoginRequest) -> Result<CanLoginResponse, Str
     Ok(CanLoginResponse {
         token: data.access_token,
         user: CanUser {
-            name: data.account.clone(),
+            name: data
+                .full_name
+                .filter(|name| !name.trim().is_empty())
+                .unwrap_or_else(|| data.account.clone()),
             account: data.account,
             station: data.station,
             access_scope: data.access_scope,

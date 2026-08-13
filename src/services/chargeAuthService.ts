@@ -17,7 +17,6 @@ export function isChargeLoginValidationError(error: unknown): error is ChargeLog
 export async function chargeLoginWithPassword(account: string, password: string): Promise<ChargeLoginResponse> {
   const response = await invoke<ChargeLoginResponse>('charge_login', { payload: { account, password } })
   const token = response?.token?.trim()
-  const station = response?.user?.station?.trim()
-  if (!token || !station || response?.user?.system !== 'charge') throw new ChargeLoginValidationError()
-  return { ...response, token, user: { ...response.user, station } }
+  if (!token || response?.user?.system !== 'charge') throw new ChargeLoginValidationError()
+  return { ...response, token, user: { ...response.user, station: response.user.station.trim() } }
 }

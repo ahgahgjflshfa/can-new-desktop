@@ -216,12 +216,10 @@ onMounted(() => {
         </div>
 
         <div v-if="visibleNotifications.length === 0 && isLoading" class="p-12 text-center">
-          <div class="mx-auto mb-3 text-4xl text-[var(--app-muted-2)] i-mdi-bell-off" />
           <p class="text-[var(--app-muted)]">載入中...</p>
         </div>
 
         <div v-if="visibleNotifications.length === 0 && !isLoading" class="p-12 text-center">
-          <div class="mx-auto mb-3 text-4xl text-[var(--app-muted-2)] i-mdi-bell-off" />
           <p class="text-[var(--app-muted)]">
             {{ activeTab === 'active' ? '目前沒有進行中的任務' : '目前沒有已完成任務' }}
           </p>

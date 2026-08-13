@@ -128,7 +128,6 @@ function setView(view: SystemType | 'settings') {
             <div class="flex items-center gap-3">
               <div class="hidden text-right md:block">
                 <div class="text-[1rem] font-semibold text-[var(--app-fg-strong)]">{{ userMeta }}</div>
-                <div class="text-[0.82rem] text-[var(--app-muted)]">{{ authStore.user?.name }}</div>
               </div>
               <div
                 class="flex h-12 w-12 items-center justify-center rounded-full bg-[var(--app-accent)] text-[1.35rem] font-bold text-[var(--app-primary-strong)]"

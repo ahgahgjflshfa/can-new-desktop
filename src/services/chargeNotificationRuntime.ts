@@ -88,7 +88,7 @@ export class ChargeNotificationController {
   }
 
   private isActive(): boolean {
-    return this.config.enabled && Boolean(this.config.token?.trim()) && Boolean(this.config.station?.trim())
+    return this.config.enabled && Boolean(this.config.token?.trim())
   }
 
   private clearTimer(): void {
@@ -103,8 +103,8 @@ export class ChargeNotificationController {
 
   private async poll(requestGeneration: number): Promise<void> {
     const token = this.config.token?.trim()
-    const station = this.config.station?.trim()
-    if (!token || !station || !this.isActive()) return
+    const station = this.config.station?.trim() ?? ''
+    if (!token || !this.isActive()) return
     this.inFlight = true
     const context = this.context(requestGeneration)
     this.callbacks.onRequestStarted?.(context)

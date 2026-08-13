@@ -2,9 +2,8 @@ import { invoke } from '@tauri-apps/api/core'
 import type { ChargeHttpError, ChargeTask } from '@/types/charge'
 
 function credentials(token: string, station: string) {
-  const cleanStation = station.trim()
-  if (!token.trim() || !cleanStation) throw new Error('缺少無線充故障登入驗證資訊，請重新登入')
-  return { token: token.trim(), station: cleanStation }
+  if (!token.trim()) throw new Error('缺少無線充故障登入驗證資訊，請重新登入')
+  return { token: token.trim(), station: station.trim() }
 }
 
 export function isChargeForbidden(error: unknown): error is ChargeHttpError {
@@ -14,7 +13,9 @@ export function isChargeForbidden(error: unknown): error is ChargeHttpError {
 export async function fetchChargeTasks(token: string, station: string): Promise<ChargeTask[]> {
   const args = credentials(token, station)
   const tasks = await invoke<ChargeTask[]>('charge_fetch_tasks', args)
-  return tasks.filter(task => typeof task.station === 'string' && task.station.trim() === args.station)
+  return args.station
+    ? tasks.filter(task => typeof task.station === 'string' && task.station.trim() === args.station)
+    : tasks
 }
 
 export async function updateChargeTask(token: string, station: string, serialNumber: number, isDone: boolean): Promise<void> {

@@ -855,7 +855,7 @@ export const useNotificationStore = defineStore('notifications', {
     setChargeSnapshot(tasks: ChargeTask[], _context?: ChargeRuntimeContext) {
       const station = this.chargeStation()
       const sanitized = tasks
-        .filter(task => Boolean(station) && task.station.trim() === station)
+        .filter(task => !station || task.station.trim() === station)
         .map(task => ({ ...task, station: task.station.trim() }))
       this.chargeTasksSnapshot = sanitized
       this.chargeRequestInFlight = false
@@ -938,13 +938,13 @@ export const useNotificationStore = defineStore('notifications', {
       const task = this.chargeTasksSnapshot.find(item => item.serialNumber === serialNumber && item.isDone !== isDone)
       const station = this.chargeStation()
       const token = useAuthStore().getSystemSession('charge')?.token
-      if (!task || !station || !token || task.station.trim() !== station) throw new Error('無效的無線充故障任務')
+      if (!task || !token || (station && task.station.trim() !== station)) throw new Error('無效的無線充故障任務')
       const controller = getChargeNotificationController()
       if (!controller?.isUsable()) throw new Error('無線充故障輪詢尚未建立')
       const generation = controller.getGeneration()
       this.chargeCompletionInFlight = true
       try {
-        await updateChargeTask(token, station, serialNumber, isDone)
+        await updateChargeTask(token, station ?? '', serialNumber, isDone)
         const current = useAuthStore().getSystemSession('charge')
         if (current?.token !== token || this.chargeStation() !== station || controller !== getChargeNotificationController() || controller.getGeneration() !== generation) return
         const currentTask = this.chargeTasksSnapshot.find(item => item.serialNumber === serialNumber)

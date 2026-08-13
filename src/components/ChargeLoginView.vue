@@ -25,7 +25,7 @@ async function submitLogin() {
   <div class="flex min-h-full items-center justify-center px-4 py-8">
     <div class="w-full max-w-[420px] rounded-[1.4rem] border border-[var(--app-border)] bg-[var(--app-surface)] px-6 py-6 shadow-lg">
       <div class="mb-6 text-center">
-        <div class="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-[var(--app-accent)] text-[var(--app-primary-strong)]"><span class="i-mdi-ev-station text-[1.3rem]" /></div>
+        <div class="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-[var(--app-accent)] text-[var(--app-primary-strong)]"><span class="i-mdi-lightning-bolt text-[1.3rem]" /></div>
         <h1 class="text-[1.4rem] font-black tracking-tight text-[var(--app-fg-strong)]">無線充故障</h1>
       </div>
       <form class="flex flex-col gap-3.5" @submit.prevent="submitLogin">

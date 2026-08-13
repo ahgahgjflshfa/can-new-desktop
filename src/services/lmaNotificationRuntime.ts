@@ -190,7 +190,7 @@ function getChargeStation(authStore: { getSystemSession: (system: Exclude<System
 function chargeContextCurrent(context: ChargeRuntimeContext, authStore: { getSystemSession: (system: Exclude<SystemType, 'charge'>) => { token: string; user?: unknown } | null }): boolean {
   const getSession = authStore.getSystemSession as unknown as (system: SystemType) => { token: string; user?: unknown } | null
   return context.controller === chargeRuntimeController && context.generation === context.controller.getGeneration() &&
-    context.token === getSession('charge')?.token?.trim() && context.station === getChargeStation(authStore)
+    context.token === getSession('charge')?.token?.trim() && context.station === (getChargeStation(authStore) ?? '')
 }
 let runtimeUnlisteners: UnlistenFn[] = []
 

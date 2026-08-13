@@ -94,8 +94,11 @@ fn transform_task(raw: serde_json::Value) -> Result<ChargeTaskItem, String> {
     Ok(ChargeTaskItem {
         serial_number: required_integer(object, "serialNumber")?,
         device_code: required_string(object, "deviceCode")?,
-        station: required_string(object, "station")?,
-        is_done: bool_value(object, "isDone"),
+        station: value(object, "station")
+            .and_then(|item| item.as_str())
+            .unwrap_or_default()
+            .to_owned(),
+        is_done: bool_value(object, "isDone") || value(object, "status").and_then(|item| item.as_str()) == Some("done"),
         clean_at: value(object, "cleanAt").and_then(|item| item.as_str().map(str::to_owned)),
         inform_time: required_integer(object, "informTime")?,
         is_disable: bool_value(object, "isDisable"),
@@ -162,9 +165,6 @@ pub async fn charge_fetch_tasks(
     station: String,
 ) -> Result<Vec<ChargeTaskItem>, ChargeHttpError> {
     let station = station.trim().to_owned();
-    if station.is_empty() {
-        return Err(http_error(0, "station is required".into()));
-    }
     let client = build_can_api_client().map_err(|message| http_error(0, message))?;
     let response = client
         .get(build_charge_api_url("/charge/task"))
@@ -192,7 +192,7 @@ pub async fn charge_fetch_tasks(
         .map(|tasks| {
             tasks
                 .into_iter()
-                .filter(|task| task.station.trim() == station)
+                .filter(|task| station.is_empty() || task.station.trim() == station)
                 .collect()
         })
 }
@@ -200,13 +200,10 @@ pub async fn charge_fetch_tasks(
 #[tauri::command]
 pub async fn charge_complete_task(
     token: String,
-    station: String,
+    _station: String,
     serial_number: i64,
     is_done: bool,
 ) -> Result<(), ChargeHttpError> {
-    if station.trim().is_empty() {
-        return Err(http_error(0, "station is required".into()));
-    }
     let client = build_can_api_client().map_err(|message| http_error(0, message))?;
     let response = client
         .patch(build_charge_api_url(&format!(
@@ -234,6 +231,17 @@ mod tests {
         let task = transform_task(json!({"serialNumber":1,"deviceCode":"D1","station":"S1","isDone":0,"cleanAt":null,"informTime":1,"isDisable":false,"createdAt":"2026-01-01","updatedAt":"2026-01-02"})).unwrap();
         assert!(!task.is_done);
         assert_eq!(task.device_code, "D1");
+    }
+    #[test]
+    fn accepts_stationless_charge_tasks() {
+        let task = transform_task(json!({"serialNumber":1,"deviceCode":"D1","status":"pending","isDone":0,"cleanAt":null,"informTime":1,"isDisable":false,"createdAt":"2026-01-01","updatedAt":"2026-01-02"})).unwrap();
+        assert_eq!(task.station, "");
+        assert!(!task.is_done);
+    }
+    #[test]
+    fn maps_charge_status_to_completion_state() {
+        let task = transform_task(json!({"serialNumber":1,"deviceCode":"D1","status":"done","informTime":1,"isDisable":false,"createdAt":"2026-01-01","updatedAt":"2026-01-02"})).unwrap();
+        assert!(task.is_done);
     }
     #[test]
     fn serializes_update_body() {
